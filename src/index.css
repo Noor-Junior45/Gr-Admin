@@ -1,5 +1,14 @@
 @import "tailwindcss";
 
+@layer utilities {
+  .font-serif-display {
+    font-family: 'Cormorant Garamond', Georgia, Cambria, 'Times New Roman', Times, serif;
+  }
+  .font-mono-code {
+    font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  }
+}
+
 @layer base {
   body {
     @apply bg-white text-slate-900 antialiased selection:bg-amber-500 selection:text-slate-950;

@@ -8,6 +8,7 @@ interface AuthContextType {
   isAdmin: boolean;
   loading: boolean;
   login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
+  sendMagicLink: (email: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => Promise<void>;
   checkAdminStatus: () => Promise<{ isAdmin: boolean; isDefinitiveNonAdmin: boolean; error?: string }>;
 }
@@ -175,6 +176,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const sendMagicLink = async (emailInput: string) => {
+    try {
+      const redirectUrl = typeof window !== 'undefined' ? `${window.location.origin}/` : undefined;
+      const { error } = await supabase.auth.signInWithOtp({
+        email: emailInput.trim(),
+        options: {
+          emailRedirectTo: redirectUrl,
+        },
+      });
+
+      if (error) {
+        return { success: false, error: error.message || 'Failed to send magic link.' };
+      }
+
+      return { success: true };
+    } catch (err: any) {
+      return {
+        success: false,
+        error: err.message || 'An unexpected error occurred while sending magic link.',
+      };
+    }
+  };
+
   const logout = async () => {
     try {
       await supabase.auth.signOut();
@@ -195,6 +219,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isAdmin,
         loading,
         login,
+        sendMagicLink,
         logout,
         checkAdminStatus,
       }}

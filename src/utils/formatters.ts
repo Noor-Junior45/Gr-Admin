@@ -69,58 +69,58 @@ export function getStatusConfig(status: OrderStatus | string): StatusConfig {
     case 'pending':
       return {
         label: 'Pending',
-        bg: 'bg-amber-500/15',
-        text: 'text-amber-300',
-        border: 'border-amber-500/30',
-        dotBg: 'bg-amber-400',
+        bg: 'bg-amber-50',
+        text: 'text-amber-800',
+        border: 'border-amber-300',
+        dotBg: 'bg-amber-500',
       };
     case 'packing':
       return {
         label: 'Packing',
-        bg: 'bg-indigo-500/15',
-        text: 'text-indigo-300',
-        border: 'border-indigo-500/30',
-        dotBg: 'bg-indigo-400',
+        bg: 'bg-indigo-50',
+        text: 'text-indigo-800',
+        border: 'border-indigo-300',
+        dotBg: 'bg-indigo-500',
       };
     case 'packed':
       return {
         label: 'Packed',
-        bg: 'bg-purple-500/15',
-        text: 'text-purple-300',
-        border: 'border-purple-500/30',
-        dotBg: 'bg-purple-400',
+        bg: 'bg-purple-50',
+        text: 'text-purple-800',
+        border: 'border-purple-300',
+        dotBg: 'bg-purple-500',
       };
     case 'shipped':
       return {
         label: 'Shipped',
-        bg: 'bg-blue-500/15',
-        text: 'text-blue-300',
-        border: 'border-blue-500/30',
-        dotBg: 'bg-blue-400',
+        bg: 'bg-blue-50',
+        text: 'text-blue-800',
+        border: 'border-blue-300',
+        dotBg: 'bg-blue-500',
       };
     case 'delivered':
       return {
         label: 'Delivered',
-        bg: 'bg-emerald-500/15',
-        text: 'text-emerald-300',
-        border: 'border-emerald-500/30',
-        dotBg: 'bg-emerald-400',
+        bg: 'bg-emerald-50',
+        text: 'text-emerald-800',
+        border: 'border-emerald-300',
+        dotBg: 'bg-emerald-500',
       };
     case 'cancelled':
       return {
         label: 'Cancelled',
-        bg: 'bg-rose-500/15',
-        text: 'text-rose-300',
-        border: 'border-rose-500/30',
-        dotBg: 'bg-rose-400',
+        bg: 'bg-rose-50',
+        text: 'text-rose-800',
+        border: 'border-rose-300',
+        dotBg: 'bg-rose-500',
       };
     default:
       return {
         label: status || 'Unknown',
-        bg: 'bg-slate-700/40',
-        text: 'text-slate-300',
-        border: 'border-slate-600',
-        dotBg: 'bg-slate-400',
+        bg: 'bg-slate-100',
+        text: 'text-slate-700',
+        border: 'border-slate-300',
+        dotBg: 'bg-slate-500',
       };
   }
 }
@@ -130,39 +130,39 @@ export function getPaymentBadge(paymentStatus: string | null | undefined) {
   if (norm === 'paid' || norm === 'completed' || norm === 'success') {
     return {
       label: 'Paid',
-      bg: 'bg-emerald-950/60',
-      text: 'text-emerald-300',
-      border: 'border-emerald-600/40',
+      bg: 'bg-emerald-50',
+      text: 'text-emerald-800',
+      border: 'border-emerald-300',
     };
   }
   if (norm === 'pending' || norm === 'unpaid') {
     return {
       label: 'Unpaid',
-      bg: 'bg-amber-950/60',
-      text: 'text-amber-300',
-      border: 'border-amber-600/40',
+      bg: 'bg-amber-50',
+      text: 'text-amber-800',
+      border: 'border-amber-300',
     };
   }
   if (norm === 'cod' || norm === 'cash_on_delivery') {
     return {
       label: 'Cash On Delivery',
-      bg: 'bg-sky-950/60',
-      text: 'text-sky-300',
-      border: 'border-sky-600/40',
+      bg: 'bg-sky-50',
+      text: 'text-sky-800',
+      border: 'border-sky-300',
     };
   }
   if (norm === 'failed') {
     return {
       label: 'Failed',
-      bg: 'bg-rose-950/60',
-      text: 'text-rose-300',
-      border: 'border-rose-600/40',
+      bg: 'bg-rose-50',
+      text: 'text-rose-800',
+      border: 'border-rose-300',
     };
   }
   return {
     label: paymentStatus || 'Pending',
-    bg: 'bg-slate-800',
-    text: 'text-slate-300',
-    border: 'border-slate-700',
+    bg: 'bg-slate-100',
+    text: 'text-slate-700',
+    border: 'border-slate-300',
   };
 }

@@ -41,29 +41,29 @@ export const LoginPage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 flex flex-col justify-center items-center px-4 py-8 sm:px-6">
+    <div className="min-h-screen bg-slate-50 flex flex-col justify-center items-center px-4 py-8 sm:px-6">
       <div className="w-full max-w-md space-y-6">
         {/* Header Branding */}
         <div className="text-center space-y-2">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-amber-500 text-slate-950 shadow-lg shadow-amber-500/20 mb-2">
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20 mb-2">
             <PackageCheck className="w-9 h-9 stroke-[2.5]" />
           </div>
-          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-white">
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-900">
             Giriraj Admin
           </h1>
-          <p className="text-sm text-slate-400 max-w-xs mx-auto">
+          <p className="text-sm text-slate-600 max-w-xs mx-auto">
             Warehouse & packing staff portal. Sign in with your assigned admin account.
           </p>
         </div>
 
         {/* Login Card */}
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-8 shadow-xl">
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 sm:p-8 shadow-sm">
           {errorMessage && (
             <div
               id="login-error-alert"
-              className="mb-5 p-3.5 rounded-xl bg-red-950/60 border border-red-800/80 text-red-200 text-sm flex items-start gap-2.5 animate-in fade-in duration-200"
+              className="mb-5 p-3.5 rounded-xl bg-red-50 border border-red-200 text-red-800 text-sm flex items-start gap-2.5 animate-in fade-in duration-200"
             >
-              <AlertCircle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
+              <AlertCircle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
               <div className="leading-snug">{errorMessage}</div>
             </div>
           )}
@@ -73,12 +73,12 @@ export const LoginPage: React.FC = () => {
             <div>
               <label
                 htmlFor="login-email"
-                className="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1.5"
+                className="block text-xs font-semibold uppercase tracking-wider text-slate-700 mb-1.5"
               >
                 Staff Email
               </label>
               <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
+                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
                   <Mail className="w-4 h-4" />
                 </div>
                 <input
@@ -89,7 +89,7 @@ export const LoginPage: React.FC = () => {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="admin@giriraj.com"
-                  className="w-full pl-10 pr-3.5 py-2.5 bg-slate-950 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-amber-500 transition min-h-[44px]"
+                  className="w-full pl-10 pr-3.5 py-2.5 bg-white border border-slate-300 rounded-xl text-slate-900 placeholder-slate-400 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-amber-500 transition min-h-[44px]"
                 />
               </div>
             </div>
@@ -98,12 +98,12 @@ export const LoginPage: React.FC = () => {
             <div>
               <label
                 htmlFor="login-password"
-                className="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1.5"
+                className="block text-xs font-semibold uppercase tracking-wider text-slate-700 mb-1.5"
               >
                 Password
               </label>
               <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
+                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
                   <Lock className="w-4 h-4" />
                 </div>
                 <input
@@ -114,12 +114,12 @@ export const LoginPage: React.FC = () => {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
-                  className="w-full pl-10 pr-11 py-2.5 bg-slate-950 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-amber-500 transition min-h-[44px]"
+                  className="w-full pl-10 pr-11 py-2.5 bg-white border border-slate-300 rounded-xl text-slate-900 placeholder-slate-400 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-amber-500 transition min-h-[44px]"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-500 hover:text-slate-300 transition cursor-pointer"
+                  className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-400 hover:text-slate-600 transition cursor-pointer"
                   tabIndex={-1}
                 >
                   {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -132,7 +132,7 @@ export const LoginPage: React.FC = () => {
               id="login-submit-btn"
               type="submit"
               disabled={submitting}
-              className="w-full mt-2 py-3 px-4 bg-amber-500 hover:bg-amber-400 disabled:bg-amber-500/50 text-slate-950 font-bold rounded-xl shadow-md transition flex items-center justify-center gap-2 cursor-pointer disabled:cursor-not-allowed min-h-[46px] active:scale-[0.99]"
+              className="w-full mt-2 py-3 px-4 bg-amber-500 hover:bg-amber-400 disabled:bg-amber-500/50 text-slate-950 font-bold rounded-xl shadow-xs transition flex items-center justify-center gap-2 cursor-pointer disabled:cursor-not-allowed min-h-[46px] active:scale-[0.99]"
             >
               {submitting ? (
                 <>
@@ -146,12 +146,12 @@ export const LoginPage: React.FC = () => {
           </form>
 
           {/* Internal tool notice */}
-          <div className="mt-6 pt-5 border-t border-slate-800 text-center">
-            <div className="flex items-center justify-center gap-1.5 text-xs text-slate-400">
-              <Warehouse className="w-3.5 h-3.5 text-amber-500" />
+          <div className="mt-6 pt-5 border-t border-slate-100 text-center">
+            <div className="flex items-center justify-center gap-1.5 text-xs text-slate-600">
+              <Warehouse className="w-3.5 h-3.5 text-amber-600" />
               <span>Internal System • Authorized Personnel Only</span>
             </div>
-            <p className="text-[11px] text-slate-400 mt-1">
+            <p className="text-[11px] text-slate-500 mt-1">
               Admin accounts are provisioned directly in Supabase.
             </p>
           </div>

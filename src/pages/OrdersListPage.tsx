@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import { withSkewRetry } from '../utils/supabaseHelper';
 import { Order, OrderStatus } from '../types';
+import { useNotifications } from '../context/NotificationContext';
+import { NotificationButton } from '../components/NotificationButton';
 import {
   formatCurrency,
   formatDateTime,
@@ -25,6 +27,8 @@ import {
   XCircle,
   Inbox,
   Sparkles,
+  Volume2,
+  VolumeX,
 } from 'lucide-react';
 
 const STATUS_TABS: { key: 'all' | OrderStatus; label: string; icon: any }[] = [
@@ -106,6 +110,23 @@ export const OrdersListPage: React.FC = () => {
 
   useEffect(() => {
     fetchOrders();
+
+    // Listen to realtime order changes to auto-update order list
+    const channel = supabase
+      .channel('orders_list_realtime_sync')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'orders' },
+        (payload) => {
+          console.log('[OrdersListPage] Realtime order change detected:', payload.eventType);
+          fetchOrders(false);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   // Compute live counts for each tab
@@ -155,39 +176,43 @@ export const OrdersListPage: React.FC = () => {
   }, [orders, selectedStatus, searchQuery]);
 
   return (
-    <div className="min-h-[calc(100vh-4rem)] bg-slate-950 pb-16">
+    <div className="min-h-[calc(100vh-4rem)] bg-slate-50 pb-16">
       {/* Top Controls Container */}
-      <div className="bg-slate-900/90 border-b border-slate-800 sticky top-16 z-30 backdrop-blur-md">
+      <div className="bg-white/95 border-b border-slate-200 sticky top-16 z-30 backdrop-blur-md shadow-xs">
         <div className="max-w-7xl mx-auto px-3 sm:px-6 py-3.5 space-y-3">
-          {/* Header Row: Title & Refresh button */}
+          {/* Header Row: Title, Notification Settings & Refresh button */}
           <div className="flex items-center justify-between gap-2">
             <div>
-              <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight flex items-center gap-2">
+              <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight flex items-center gap-2">
                 <span>Orders Dashboard</span>
-                <span className="text-xs font-semibold px-2 py-0.5 bg-slate-800 text-slate-300 rounded-full border border-slate-700 font-mono">
+                <span className="text-xs font-semibold px-2 py-0.5 bg-slate-100 text-slate-700 rounded-full border border-slate-200 font-mono">
                   {filteredOrders.length} {filteredOrders.length === 1 ? 'order' : 'orders'}
                 </span>
               </h1>
-              <p className="text-xs text-slate-400 mt-0.5">
+              <p className="text-xs text-slate-500 mt-0.5">
                 Real-time queue for packing and dispatch
               </p>
             </div>
 
-            <button
-              id="refresh-orders-btn"
-              onClick={() => fetchOrders(true)}
-              disabled={refreshing || loading}
-              className="flex items-center gap-1.5 px-3 py-2 text-xs sm:text-sm font-medium text-slate-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg transition active:scale-95 disabled:opacity-50 cursor-pointer min-h-[40px]"
-              title="Refresh orders list"
-            >
-              <RefreshCw className={`w-4 h-4 text-amber-400 ${refreshing ? 'animate-spin' : ''}`} />
-              <span className="hidden sm:inline">Refresh</span>
-            </button>
+            <div className="flex items-center gap-2">
+              <NotificationButton variant="full" />
+
+              <button
+                id="refresh-orders-btn"
+                onClick={() => fetchOrders(true)}
+                disabled={refreshing || loading}
+                className="flex items-center gap-1.5 px-3 py-2 text-xs sm:text-sm font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-lg transition active:scale-95 disabled:opacity-50 cursor-pointer min-h-[40px]"
+                title="Refresh orders list"
+              >
+                <RefreshCw className={`w-4 h-4 text-amber-600 ${refreshing ? 'animate-spin' : ''}`} />
+                <span className="hidden sm:inline">Refresh</span>
+              </button>
+            </div>
           </div>
 
           {/* Search Box */}
           <div className="relative">
-            <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
+            <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
               <Search className="w-4 h-4" />
             </div>
             <input
@@ -196,12 +221,12 @@ export const OrdersListPage: React.FC = () => {
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search by recipient name, phone, order ID, or city..."
-              className="w-full pl-10 pr-9 py-2.5 bg-slate-950/80 border border-slate-700/80 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-amber-500 transition min-h-[44px]"
+              className="w-full pl-10 pr-9 py-2.5 bg-white border border-slate-300 rounded-xl text-slate-900 placeholder-slate-400 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-amber-500 transition min-h-[44px]"
             />
             {searchQuery && (
               <button
                 onClick={() => setSearchQuery('')}
-                className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-500 hover:text-slate-300 transition text-xs font-semibold"
+                className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 transition text-xs font-semibold"
               >
                 Clear
               </button>
@@ -223,17 +248,17 @@ export const OrdersListPage: React.FC = () => {
                     onClick={() => setSelectedStatus(tab.key)}
                     className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold transition whitespace-nowrap cursor-pointer min-h-[40px] ${
                       isActive
-                        ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20 font-bold'
-                        : 'bg-slate-800/80 text-slate-300 hover:bg-slate-800 hover:text-white border border-slate-700/60'
+                        ? 'bg-amber-500 text-slate-950 shadow-xs font-bold'
+                        : 'bg-white text-slate-700 hover:bg-slate-100 hover:text-slate-900 border border-slate-200'
                     }`}
                   >
-                    <TabIcon className={`w-3.5 h-3.5 ${isActive ? 'text-slate-950' : 'text-slate-400'}`} />
+                    <TabIcon className={`w-3.5 h-3.5 ${isActive ? 'text-slate-950' : 'text-slate-500'}`} />
                     <span>{tab.label}</span>
                     <span
                       className={`px-1.5 py-0.2 rounded-full text-[11px] font-mono leading-tight font-bold ${
                         isActive
                           ? 'bg-slate-950/20 text-slate-950'
-                          : 'bg-slate-700 text-slate-300'
+                          : 'bg-slate-100 text-slate-600'
                       }`}
                     >
                       {count}
@@ -250,14 +275,14 @@ export const OrdersListPage: React.FC = () => {
       <main className="max-w-7xl mx-auto px-3 sm:px-6 pt-4">
         {/* Error Alert */}
         {error && (
-          <div className="mb-4 p-4 rounded-xl bg-red-950/70 border border-red-800 text-red-200 text-sm flex items-start gap-3">
-            <AlertCircle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
+          <div className="mb-4 p-4 rounded-xl bg-red-50 border border-red-200 text-red-800 text-sm flex items-start gap-3">
+            <AlertCircle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
             <div className="flex-1">
               <div className="font-semibold">Unable to fetch orders</div>
-              <div className="text-xs text-red-300/90 mt-0.5">{error}</div>
+              <div className="text-xs text-red-700 mt-0.5">{error}</div>
               <button
                 onClick={() => fetchOrders(true)}
-                className="mt-2 text-xs font-bold underline hover:text-white"
+                className="mt-2 text-xs font-bold underline hover:text-red-900"
               >
                 Try Again
               </button>
@@ -271,14 +296,14 @@ export const OrdersListPage: React.FC = () => {
             {[1, 2, 3, 4, 5].map((idx) => (
               <div
                 key={idx}
-                className="bg-slate-900 border border-slate-800 rounded-xl p-4 animate-pulse flex flex-col sm:flex-row justify-between gap-4"
+                className="bg-white border border-slate-200 rounded-xl p-4 animate-pulse flex flex-col sm:flex-row justify-between gap-4"
               >
                 <div className="space-y-2 flex-1">
-                  <div className="h-4 bg-slate-800 rounded w-1/4"></div>
-                  <div className="h-5 bg-slate-800 rounded w-1/2"></div>
-                  <div className="h-3 bg-slate-800 rounded w-1/3"></div>
+                  <div className="h-4 bg-slate-100 rounded w-1/4"></div>
+                  <div className="h-5 bg-slate-100 rounded w-1/2"></div>
+                  <div className="h-3 bg-slate-100 rounded w-1/3"></div>
                 </div>
-                <div className="h-8 bg-slate-800 rounded w-24 self-end sm:self-center"></div>
+                <div className="h-8 bg-slate-100 rounded w-24 self-end sm:self-center"></div>
               </div>
             ))}
           </div>
@@ -286,12 +311,12 @@ export const OrdersListPage: React.FC = () => {
 
         {/* Empty State */}
         {!loading && filteredOrders.length === 0 && (
-          <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-8 sm:p-12 text-center my-6">
-            <div className="w-14 h-14 rounded-2xl bg-slate-800 flex items-center justify-center mx-auto mb-3 text-slate-500">
+          <div className="bg-white border border-slate-200 rounded-2xl p-8 sm:p-12 text-center my-6 shadow-xs">
+            <div className="w-14 h-14 rounded-2xl bg-slate-100 flex items-center justify-center mx-auto mb-3 text-slate-400">
               <Filter className="w-7 h-7" />
             </div>
-            <h3 className="text-lg font-bold text-white">No Orders Found</h3>
-            <p className="text-sm text-slate-400 max-w-sm mx-auto mt-1">
+            <h3 className="text-lg font-bold text-slate-900">No Orders Found</h3>
+            <p className="text-sm text-slate-600 max-w-sm mx-auto mt-1">
               {searchQuery
                 ? `No orders matching "${searchQuery}". Try a different keyword or reset filters.`
                 : selectedStatus !== 'all'
@@ -304,7 +329,7 @@ export const OrdersListPage: React.FC = () => {
                   setSearchQuery('');
                   setSelectedStatus('all');
                 }}
-                className="mt-4 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-amber-400 text-xs sm:text-sm font-semibold rounded-xl border border-slate-700 transition"
+                className="mt-4 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-amber-800 text-xs sm:text-sm font-semibold rounded-xl border border-slate-200 transition cursor-pointer"
               >
                 Reset All Filters
               </button>
@@ -324,22 +349,22 @@ export const OrdersListPage: React.FC = () => {
                   key={order.id}
                   id={`order-row-${order.id}`}
                   onClick={() => navigate(`/orders/${order.id}`)}
-                  className="group bg-slate-900 hover:bg-slate-850 border border-slate-800 hover:border-amber-500/40 rounded-xl p-4 sm:p-5 transition shadow-sm hover:shadow-md cursor-pointer relative active:scale-[0.998]"
+                  className="group bg-white hover:bg-amber-50/20 border border-slate-200 hover:border-amber-400 rounded-xl p-4 sm:p-5 transition shadow-xs hover:shadow-sm cursor-pointer relative active:scale-[0.998]"
                 >
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                     {/* Left details */}
                     <div className="space-y-1.5 flex-1">
                       {/* Top metadata line: Order ID + Placed Date */}
                       <div className="flex flex-wrap items-center gap-2 text-xs">
-                        <span className="font-mono font-bold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
+                        <span className="font-mono font-bold text-amber-800 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
                           {formatShortId(order.id)}
                         </span>
-                        <span className="text-slate-400 flex items-center gap-1 font-medium">
-                          <Clock className="w-3.5 h-3.5 text-slate-500" />
+                        <span className="text-slate-500 flex items-center gap-1 font-medium">
+                          <Clock className="w-3.5 h-3.5 text-slate-400" />
                           {formatDateTime(order.placed_at)}
                         </span>
                         {order.address_label && (
-                          <span className="text-[10px] font-semibold uppercase tracking-wider bg-slate-800 text-slate-300 px-1.5 py-0.5 rounded">
+                          <span className="text-[10px] font-semibold uppercase tracking-wider bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded border border-slate-200">
                             {order.address_label}
                           </span>
                         )}
@@ -347,25 +372,25 @@ export const OrdersListPage: React.FC = () => {
 
                       {/* Recipient info */}
                       <div className="flex items-center gap-2">
-                        <span className="text-base sm:text-lg font-bold text-white group-hover:text-amber-300 transition">
+                        <span className="text-base sm:text-lg font-bold text-slate-900 group-hover:text-amber-800 transition">
                           {order.recipient_name || 'Anonymous Customer'}
                         </span>
                       </div>
 
                       {/* Phone & Destination */}
-                      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs sm:text-sm text-slate-300">
+                      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs sm:text-sm text-slate-600">
                         {order.recipient_phone && (
-                          <span className="flex items-center gap-1 text-slate-400">
-                            <Phone className="w-3.5 h-3.5 text-amber-500/80" />
-                            <span className="font-mono text-slate-300">{order.recipient_phone}</span>
+                          <span className="flex items-center gap-1 text-slate-600">
+                            <Phone className="w-3.5 h-3.5 text-amber-600" />
+                            <span className="font-mono text-slate-800">{order.recipient_phone}</span>
                           </span>
                         )}
-                        <span className="text-slate-400">
+                        <span className="text-slate-600">
                           {order.city ? `${order.city}, ${order.pincode || ''}` : order.pincode}
                         </span>
                         {order.item_count !== undefined && order.item_count > 0 && (
-                          <span className="flex items-center gap-1 text-slate-400">
-                            <Package className="w-3.5 h-3.5 text-slate-500" />
+                          <span className="flex items-center gap-1 text-slate-600">
+                            <Package className="w-3.5 h-3.5 text-slate-400" />
                             <span>
                               {order.item_count} {order.item_count === 1 ? 'item' : 'items'}
                             </span>
@@ -375,10 +400,10 @@ export const OrdersListPage: React.FC = () => {
                     </div>
 
                     {/* Right summary: Total, Status Badges, Action Chevron */}
-                    <div className="flex items-center justify-between sm:justify-end gap-3 sm:gap-4 pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-800/80">
+                    <div className="flex items-center justify-between sm:justify-end gap-3 sm:gap-4 pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-100">
                       {/* Price & Payment */}
                       <div className="text-left sm:text-right">
-                        <div className="text-base sm:text-lg font-bold text-white font-mono">
+                        <div className="text-base sm:text-lg font-bold text-slate-900 font-mono">
                           {formatCurrency(order.total_amount)}
                         </div>
                         <div className="flex items-center sm:justify-end gap-1.5 mt-0.5">
@@ -388,7 +413,7 @@ export const OrdersListPage: React.FC = () => {
                             {paymentBadge.label}
                           </span>
                           {order.payment_method && (
-                            <span className="text-[10px] uppercase font-mono text-slate-400 bg-slate-800 px-1.5 py-0.5 rounded">
+                            <span className="text-[10px] uppercase font-mono text-slate-600 bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded">
                               {order.payment_method}
                             </span>
                           )}
@@ -403,7 +428,7 @@ export const OrdersListPage: React.FC = () => {
                           <span className={`w-1.5 h-1.5 rounded-full ${statusCfg.dotBg}`} />
                           {statusCfg.label}
                         </span>
-                        <ChevronRight className="w-5 h-5 text-slate-500 group-hover:text-amber-400 group-hover:translate-x-0.5 transition" />
+                        <ChevronRight className="w-5 h-5 text-slate-400 group-hover:text-amber-600 group-hover:translate-x-0.5 transition" />
                       </div>
                     </div>
                   </div>

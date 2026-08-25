@@ -3,68 +3,106 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
 import { NotificationProvider } from './context/NotificationContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
-import { Header } from './components/Header';
+import { AdminLayout } from './components/AdminLayout';
 import { LoginPage } from './pages/LoginPage';
+import { DashboardPage } from './pages/DashboardPage';
 import { OrdersListPage } from './pages/OrdersListPage';
 import { OrderDetailPage } from './pages/OrderDetailPage';
-import { NewOrderAlertBanner } from './components/NewOrderAlertBanner';
-import { NotificationSettingsModal } from './components/NotificationSettingsModal';
+import { ProductsStockPage } from './pages/ProductsStockPage';
+import { PackingQueuePage } from './pages/PackingQueuePage';
+import { DispatchBoardPage } from './pages/DispatchBoardPage';
+import { DeliveryPartnersPage } from './pages/DeliveryPartnersPage';
 
 export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
         <NotificationProvider>
-          <div className="min-h-screen bg-slate-50/50 text-slate-900 flex flex-col">
-            {/* Global Realtime Alerts & Modals */}
-            <NewOrderAlertBanner />
-            <NotificationSettingsModal />
+          <Routes>
+            {/* Public Login Screen */}
+            <Route path="/login" element={<LoginPage />} />
 
-            <Routes>
-              {/* Public Login Route */}
-              <Route path="/login" element={<LoginPage />} />
+            {/* Protected Routes inside Admin Operations Shell */}
+            <Route
+              path="/"
+              element={
+                <ProtectedRoute>
+                  <AdminLayout>
+                    <DashboardPage />
+                  </AdminLayout>
+                </ProtectedRoute>
+              }
+            />
 
-              {/* Protected Routes with App Shell Header */}
-              <Route
-                path="/"
-                element={
-                  <ProtectedRoute>
-                    <>
-                      <Header />
-                      <OrdersListPage />
-                    </>
-                  </ProtectedRoute>
-                }
-              />
+            <Route
+              path="/orders"
+              element={
+                <ProtectedRoute>
+                  <AdminLayout>
+                    <OrdersListPage />
+                  </AdminLayout>
+                </ProtectedRoute>
+              }
+            />
 
-              <Route
-                path="/orders"
-                element={
-                  <ProtectedRoute>
-                    <>
-                      <Header />
-                      <OrdersListPage />
-                    </>
-                  </ProtectedRoute>
-                }
-              />
+            <Route
+              path="/packing"
+              element={
+                <ProtectedRoute>
+                  <AdminLayout>
+                    <PackingQueuePage />
+                  </AdminLayout>
+                </ProtectedRoute>
+              }
+            />
 
-              <Route
-                path="/orders/:id"
-                element={
-                  <ProtectedRoute>
-                    <>
-                      <Header />
-                      <OrderDetailPage />
-                    </>
-                  </ProtectedRoute>
-                }
-              />
+            <Route
+              path="/dispatch"
+              element={
+                <ProtectedRoute>
+                  <AdminLayout>
+                    <DispatchBoardPage />
+                  </AdminLayout>
+                </ProtectedRoute>
+              }
+            />
 
-              {/* Fallback to Home */}
-              <Route path="*" element={<Navigate to="/" replace />} />
-            </Routes>
-          </div>
+            <Route
+              path="/delivery-partners"
+              element={
+                <ProtectedRoute>
+                  <AdminLayout>
+                    <DeliveryPartnersPage />
+                  </AdminLayout>
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/orders/:id"
+              element={
+                <ProtectedRoute>
+                  <AdminLayout>
+                    <OrderDetailPage />
+                  </AdminLayout>
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/products"
+              element={
+                <ProtectedRoute>
+                  <AdminLayout>
+                    <ProductsStockPage />
+                  </AdminLayout>
+                </ProtectedRoute>
+              }
+            />
+
+            {/* Fallback */}
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
         </NotificationProvider>
       </AuthProvider>
     </BrowserRouter>

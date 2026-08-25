@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
+import React, { createContext, useContext, useEffect, useState, useRef, useCallback } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import {
   SoundType,
@@ -8,7 +8,7 @@ import {
   stopSoundLoop,
   unlockAudioContext,
 } from '../utils/audioNotification';
-import { Order } from '../types';
+import { Order, RealtimeConnectionState } from '../types';
 
 export interface NotificationSettings {
   soundEnabled: boolean;
@@ -45,6 +45,9 @@ interface NotificationContextType {
   enableAudioOnGesture: () => Promise<void>;
   newOrderCountSinceOpen: number;
   resetNewOrderCount: () => void;
+  realtimeStatus: RealtimeConnectionState;
+  lastSyncTime: Date | null;
+  reconnectRealtime: () => void;
 }
 
 const NotificationContext = createContext<NotificationContextType | undefined>(undefined);
@@ -66,6 +69,10 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
   const [activeAlert, setActiveAlert] = useState<Order | null>(null);
   const [newOrderCountSinceOpen, setNewOrderCountSinceOpen] = useState(0);
   const [isAudioUnlocked, setIsAudioUnlocked] = useState(false);
+  const [realtimeStatus, setRealtimeStatus] = useState<RealtimeConnectionState>('connecting');
+  const [lastSyncTime, setLastSyncTime] = useState<Date | null>(new Date());
+  const [reconnectNonce, setReconnectNonce] = useState(0);
+
   const [desktopPermissionState, setDesktopPermissionState] = useState<
     NotificationPermission | 'unsupported'
   >(() => {
@@ -75,11 +82,10 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     return 'unsupported';
   });
 
-  // Track known order IDs to avoid duplicate alerts on initial load
+  // Track known order IDs to prevent duplicate sound/alert triggers
   const knownOrderIdsRef = useRef<Set<string>>(new Set());
   const isInitializedRef = useRef(false);
 
-  // Save settings whenever changed
   const updateSettings = (newSettings: Partial<NotificationSettings>) => {
     setSettings((prev) => {
       const updated = { ...prev, ...newSettings };
@@ -99,7 +105,6 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     }
   };
 
-  // Preview / Test current sound
   const playCurrentSound = () => {
     enableAudioOnGesture();
     playSoundEffect(settings.soundType, settings.volume);
@@ -137,46 +142,56 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     setNewOrderCountSinceOpen(0);
   };
 
+  const reconnectRealtime = useCallback(() => {
+    setRealtimeStatus('connecting');
+    setReconnectNonce((n) => n + 1);
+  }, []);
+
   // Trigger alert workflow when a new order is received
-  const triggerNewOrderAlert = (order: Order) => {
-    setActiveAlert(order);
-    setNewOrderCountSinceOpen((prev) => prev + 1);
+  const triggerNewOrderAlert = useCallback(
+    (order: Order) => {
+      setActiveAlert(order);
+      setNewOrderCountSinceOpen((prev) => prev + 1);
+      setLastSyncTime(new Date());
 
-    // 1. Play Sound
-    if (settings.soundEnabled) {
-      enableAudioOnGesture();
-      if (settings.repeatUntilDismissed) {
-        const option = SOUND_OPTIONS.find((s) => s.id === settings.soundType);
-        const interval = (option?.durationSec || 1.5) + 1.5;
-        startSoundLoop(settings.soundType, settings.volume, interval);
-      } else {
-        playSoundEffect(settings.soundType, settings.volume);
+      // 1. Play sound if configured
+      if (settings.soundEnabled) {
+        enableAudioOnGesture();
+        if (settings.repeatUntilDismissed) {
+          const option = SOUND_OPTIONS.find((s) => s.id === settings.soundType);
+          const interval = (option?.durationSec || 1.5) + 1.5;
+          startSoundLoop(settings.soundType, settings.volume, interval);
+        } else {
+          playSoundEffect(settings.soundType, settings.volume);
+        }
       }
-    }
 
-    // 2. Desktop Notification
-    if (
-      settings.desktopNotifications &&
-      typeof window !== 'undefined' &&
-      'Notification' in window &&
-      Notification.permission === 'granted'
-    ) {
-      try {
-        const title = `🔔 New Order Received #${order.id?.slice(0, 8)}`;
-        const body = `${order.recipient_name || 'Customer'} • ₹${order.total_amount || 0} • ${order.city || 'Standard Delivery'}`;
-        const notification = new Notification(title, {
-          body,
-          icon: '/favicon.ico',
-        });
-        notification.onclick = () => {
-          window.focus();
-          window.location.href = `/orders/${order.id}`;
-        };
-      } catch (err) {
-        console.warn('Could not display system desktop notification:', err);
+      // 2. Desktop Notification
+      if (
+        settings.desktopNotifications &&
+        typeof window !== 'undefined' &&
+        'Notification' in window &&
+        Notification.permission === 'granted'
+      ) {
+        try {
+          const shortId = order.id ? `#${order.id.slice(0, 8).toUpperCase()}` : '';
+          const title = `⚡ New Order Received ${shortId}`;
+          const body = `${order.recipient_name || 'Customer'} • ₹${order.total_amount || 0} • ${order.city || 'Standard Delivery'}`;
+          const notification = new Notification(title, {
+            body,
+            icon: '/favicon.ico',
+          });
+          notification.onclick = () => {
+            window.focus();
+            window.location.href = `/orders/${order.id}`;
+          };
+        } catch (err) {
+          console.warn('Could not display system desktop notification:', err);
+        }
       }
-    }
-  };
+    },
+    [settings]
+  );
 
   // Test simulation helper
   const testOrderNotification = () => {
@@ -185,7 +200,6 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
       status: 'pending',
       recipient_name: 'Rajesh Sharma (Test Order)',
       recipient_phone: '+91 98765 43210',
-      recipient_email: 'rajesh.sharma@example.com',
       address_line1: 'Flat 402, Sai Residency, Station Road',
       city: 'Ahmedabad',
       state: 'Gujarat',
@@ -209,7 +223,7 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
           .from('orders')
           .select('id')
           .order('placed_at', { ascending: false })
-          .limit(100);
+          .limit(150);
 
         if (data) {
           data.forEach((o: any) => knownOrderIdsRef.current.add(o.id));
@@ -218,6 +232,7 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
         console.warn('Initial orders check for notification listener failed:', e);
       } finally {
         isInitializedRef.current = true;
+        setLastSyncTime(new Date());
       }
     };
 
@@ -226,8 +241,10 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
   // Supabase Realtime Subscription for incoming orders
   useEffect(() => {
+    setRealtimeStatus('connecting');
+
     const channel = supabase
-      .channel('realtime_orders_notifications')
+      .channel(`realtime_orders_notifications_${reconnectNonce}`)
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'orders' },
@@ -235,27 +252,42 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
           const newOrder = payload.new as Order;
           if (!newOrder || !newOrder.id) return;
 
-          // Avoid duplicates if already known
+          // De-duplicate: ignore if already processed
           if (knownOrderIdsRef.current.has(newOrder.id)) return;
           knownOrderIdsRef.current.add(newOrder.id);
 
-          // Only trigger if we've finished initial load
+          // Only trigger alert if initial load is done
           if (isInitializedRef.current) {
             console.log('[Notification] New order received in realtime:', newOrder.id);
             triggerNewOrderAlert(newOrder);
           }
         }
       )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'orders' },
+        () => {
+          setLastSyncTime(new Date());
+        }
+      )
       .subscribe((status) => {
-        console.log('[Supabase Realtime] Orders channel status:', status);
+        console.log('[Supabase Realtime] Channel status:', status);
+        if (status === 'SUBSCRIBED') {
+          setRealtimeStatus('connected');
+          setLastSyncTime(new Date());
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          setRealtimeStatus('error');
+        } else if (status === 'CLOSED') {
+          setRealtimeStatus('disconnected');
+        }
       });
 
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [settings]);
+  }, [reconnectNonce, triggerNewOrderAlert]);
 
-  // Clean up looping sound on unmount
+  // Clean up sound on unmount
   useEffect(() => {
     return () => {
       stopSoundLoop();
@@ -281,6 +313,9 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
         enableAudioOnGesture,
         newOrderCountSinceOpen,
         resetNewOrderCount,
+        realtimeStatus,
+        lastSyncTime,
+        reconnectRealtime,
       }}
     >
       {children}

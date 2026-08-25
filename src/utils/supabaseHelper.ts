@@ -1,14 +1,14 @@
 export async function withSkewRetry<T = any>(
-  fn: () => PromiseLike<{ data: T | null; error: any }> | Promise<{ data: T | null; error: any }>,
+  fn: () => PromiseLike<{ data: T | null; error: any; count?: number | null }> | Promise<{ data: T | null; error: any; count?: number | null }>,
   maxRetries = 4,
   baseDelayMs = 600
-): Promise<{ data: T | null; error: any }> {
+): Promise<{ data: T | null; error: any; count?: number | null }> {
   let lastError: any = null;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       const res = await fn();
       if (!res.error) {
-        return res as { data: T | null; error: any };
+        return res as { data: T | null; error: any; count?: number | null };
       }
 
       lastError = res.error;
@@ -27,7 +27,7 @@ export async function withSkewRetry<T = any>(
         continue;
       }
 
-      return res as { data: T | null; error: any };
+      return res as { data: T | null; error: any; count?: number | null };
     } catch (err: any) {
       lastError = err;
       if (attempt < maxRetries) {
@@ -40,4 +40,3 @@ export async function withSkewRetry<T = any>(
   }
   return { data: null, error: lastError };
 }
-

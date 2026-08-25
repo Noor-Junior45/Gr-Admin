@@ -51,15 +51,21 @@ export interface Order {
 
 export interface AdminUser {
   user_id: string;
-  role: string;
-  created_at: string;
+  role?: string | null;
+  created_at?: string | null;
 }
 
+export type AdminCheck =
+  | { kind: 'admin' }
+  | { kind: 'not_admin' }
+  | { kind: 'error'; message: string };
+
 export interface AuthState {
-  isAuthenticated: boolean;
-  isAdmin: boolean;
-  isLoading: boolean;
+  user: any | null;
   email: string | null;
-  userId: string | null;
-  error: string | null;
+  isAdmin: boolean;
+  adminCheck: AdminCheck | null;
+  verificationError: string | null;
+  loading: boolean;
 }
+

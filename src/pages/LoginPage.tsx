@@ -11,6 +11,7 @@ import {
   Send,
   RotateCw,
   Sparkles,
+  RefreshCw,
 } from 'lucide-react';
 
 export const LoginPage: React.FC = () => {
@@ -23,11 +24,25 @@ export const LoginPage: React.FC = () => {
   const [magicLinkSent, setMagicLinkSent] = useState(false);
   const [resendCooldown, setResendCooldown] = useState(0);
 
-  const { login, sendMagicLink } = useAuth();
+  const { login, sendMagicLink, retryAdminCheck, verificationError, isAdmin } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
   const from = (location.state as any)?.from?.pathname || '/';
+
+  // Navigate if already verified admin
+  useEffect(() => {
+    if (isAdmin) {
+      navigate(from, { replace: true });
+    }
+  }, [isAdmin, navigate, from]);
+
+  // Sync context verification error
+  useEffect(() => {
+    if (verificationError) {
+      setErrorMessage(verificationError);
+    }
+  }, [verificationError]);
 
   // Resend countdown timer
   useEffect(() => {
@@ -105,6 +120,25 @@ export const LoginPage: React.FC = () => {
     }
   };
 
+  const handleRetryVerification = async () => {
+    setSubmitting(true);
+    setErrorMessage(null);
+    try {
+      const result = await retryAdminCheck();
+      if (result.kind === 'admin') {
+        navigate(from, { replace: true });
+      } else if (result.kind === 'not_admin') {
+        setErrorMessage('This account does not have admin permissions.');
+      } else {
+        setErrorMessage(`Verification error: ${result.message}`);
+      }
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Failed to re-verify permissions.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-[#fdfdfc] text-[#1a1a18] flex flex-col font-sans antialiased selection:bg-[#1a1a18] selection:text-[#fdfdfc]">
       {/* Main Split Grid */}
@@ -170,14 +204,26 @@ export const LoginPage: React.FC = () => {
               </div>
             )}
 
-            {/* Error Message */}
+            {/* Error Message with Retry */}
             {errorMessage && (
               <div
                 id="login-error-alert"
-                className="mb-8 p-4 bg-red-50 border border-red-200 text-red-900 text-xs sm:text-sm flex items-start gap-3 rounded-none animate-in fade-in"
+                className="mb-8 p-4 bg-red-50 border border-red-200 text-red-900 text-xs sm:text-sm flex flex-col gap-2.5 rounded-none animate-in fade-in"
               >
-                <AlertCircle className="w-4 h-4 text-red-700 shrink-0 mt-0.5" />
-                <div className="leading-snug">{errorMessage}</div>
+                <div className="flex items-start gap-2.5">
+                  <AlertCircle className="w-4 h-4 text-red-700 shrink-0 mt-0.5" />
+                  <div className="leading-snug flex-1">{errorMessage}</div>
+                </div>
+                {/* Show direct retry button if error is a verification failure */}
+                <button
+                  type="button"
+                  onClick={handleRetryVerification}
+                  disabled={submitting}
+                  className="self-start inline-flex items-center gap-1.5 px-3 py-1.5 bg-red-100 hover:bg-red-200 text-red-900 border border-red-300 font-mono-code text-[11px] uppercase tracking-wider transition cursor-pointer disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-3 h-3 ${submitting ? 'animate-spin' : ''}`} />
+                  <span>Retry Verification</span>
+                </button>
               </div>
             )}
 

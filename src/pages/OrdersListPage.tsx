@@ -2,7 +2,7 @@ import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import { Order, OrderStatus, OrderFilters } from '../types';
-import { fetchOrdersList, exportOrdersToCSV } from '../services/orderService';
+import { fetchOrdersList, exportOrdersToCSV, deleteOrder } from '../services/orderService';
 import { useNotifications } from '../context/NotificationContext';
 import { StatusTimelineSelector } from '../components/StatusTimelineSelector';
 import {
@@ -39,6 +39,8 @@ import {
   Check,
   Layers,
   Radio,
+  Trash2,
+  Loader2,
 } from 'lucide-react';
 
 export const OrdersListPage: React.FC = () => {
@@ -86,6 +88,7 @@ export const OrdersListPage: React.FC = () => {
   });
   const [loading, setLoading] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
+  const [deletingOrderId, setDeletingOrderId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showFiltersDrawer, setShowFiltersDrawer] = useState<boolean>(false);
 
@@ -235,6 +238,27 @@ export const OrdersListPage: React.FC = () => {
       orders,
       `giriraj_orders_${statusTab}_${new Date().toISOString().slice(0, 10)}.csv`
     );
+  };
+
+  const handleDeleteOrder = async (e: React.MouseEvent, orderId: string) => {
+    e.stopPropagation();
+    if (
+      !window.confirm(
+        'Are you sure you want to permanently delete this order?\n\nThis will remove the order and its items from user history and operational records. This cannot be undone.'
+      )
+    ) {
+      return;
+    }
+
+    setDeletingOrderId(orderId);
+    try {
+      await deleteOrder(orderId);
+      await Promise.all([loadOrders(true), loadStatusCounts()]);
+    } catch (err: any) {
+      alert(err.message || 'Failed to delete order.');
+    } finally {
+      setDeletingOrderId(null);
+    }
   };
 
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
@@ -710,9 +734,24 @@ export const OrdersListPage: React.FC = () => {
 
                         {/* Action */}
                         <td className="py-3.5 px-4 text-right">
-                          <span className="inline-flex items-center gap-1 text-xs font-semibold text-amber-700 group-hover:text-amber-800">
-                            Workspace <ChevronRight className="w-3.5 h-3.5" />
-                          </span>
+                          <div className="flex items-center justify-end gap-2">
+                            <button
+                              type="button"
+                              onClick={(e) => handleDeleteOrder(e, order.id)}
+                              disabled={deletingOrderId === order.id}
+                              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition cursor-pointer disabled:opacity-50"
+                              title="Delete order permanently from user history"
+                            >
+                              {deletingOrderId === order.id ? (
+                                <Loader2 className="w-3.5 h-3.5 animate-spin text-rose-600" />
+                              ) : (
+                                <Trash2 className="w-3.5 h-3.5" />
+                              )}
+                            </button>
+                            <span className="inline-flex items-center gap-1 text-xs font-semibold text-amber-700 group-hover:text-amber-800">
+                              Workspace <ChevronRight className="w-3.5 h-3.5" />
+                            </span>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -784,9 +823,24 @@ export const OrdersListPage: React.FC = () => {
 
                     <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-400">
                       <span>{formatDateTime(order.placed_at)}</span>
-                      <span className="font-semibold text-amber-700 flex items-center gap-0.5">
-                        Manage <ChevronRight className="w-3 h-3" />
-                      </span>
+                      <div className="flex items-center gap-3">
+                        <button
+                          type="button"
+                          onClick={(e) => handleDeleteOrder(e, order.id)}
+                          disabled={deletingOrderId === order.id}
+                          className="flex items-center gap-1 text-rose-600 hover:text-rose-700 font-medium px-2 py-0.5 rounded hover:bg-rose-50 transition cursor-pointer"
+                        >
+                          {deletingOrderId === order.id ? (
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                          ) : (
+                            <Trash2 className="w-3 h-3" />
+                          )}
+                          <span>Delete</span>
+                        </button>
+                        <span className="font-semibold text-amber-700 flex items-center gap-0.5">
+                          Manage <ChevronRight className="w-3 h-3" />
+                        </span>
+                      </div>
                     </div>
                   </div>
                 );

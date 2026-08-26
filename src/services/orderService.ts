@@ -524,6 +524,153 @@ export async function markRefundCompletedRPC(orderId: string): Promise<any> {
 }
 
 /**
+ * Permanently delete an order and all its associated records (tracking events, deliveries, order items)
+ * from the database, completely removing it from user order history and operational queues.
+ */
+export async function deleteOrder(orderId: string): Promise<{ success: boolean; message?: string }> {
+  if (!orderId) {
+    throw new Error('Order ID is required to delete an order.');
+  }
+
+  try {
+    console.log('[orderService] Initiating order deletion for ID:', orderId);
+
+    // 1. Try atomic server-side RPC if configured in Supabase (runs with SECURITY DEFINER)
+    try {
+      const { data: rpcData, error: rpcErr } = await supabase.rpc('delete_order', {
+        p_order_id: orderId,
+      });
+
+      if (!rpcErr && rpcData) {
+        console.log('[orderService] Order successfully deleted via Supabase RPC delete_order:', rpcData);
+        // Clear local caches
+        cleanLocalOrderCaches(orderId);
+        return { success: true, message: 'Order successfully deleted from backend database.' };
+      }
+    } catch (rpcEx) {
+      console.warn('[orderService] RPC delete_order not available or threw, proceeding with direct cascade delete:', rpcEx);
+    }
+
+    // 2. Direct Cascade Deletion: Delete all child records first to satisfy Foreign Key constraints
+
+    // (a) Delete delivery tracking events
+    try {
+      const { data: delData } = await supabase
+        .from('deliveries')
+        .select('id')
+        .eq('order_id', orderId);
+
+      const deliveryIds = (delData || []).map((d: any) => d.id).filter(Boolean);
+      if (deliveryIds.length > 0) {
+        await supabase
+          .from('delivery_tracking_events')
+          .delete()
+          .in('delivery_id', deliveryIds);
+      }
+    } catch (e) {
+      console.warn('[orderService] Non-fatal delivery tracking cleanup by delivery_id:', e);
+    }
+
+    try {
+      await supabase
+        .from('delivery_tracking_events')
+        .delete()
+        .eq('order_id', orderId);
+    } catch (e) {
+      console.warn('[orderService] Non-fatal delivery tracking cleanup by order_id:', e);
+    }
+
+    // (b) Delete deliveries
+    try {
+      await supabase
+        .from('deliveries')
+        .delete()
+        .eq('order_id', orderId);
+    } catch (e) {
+      console.warn('[orderService] Non-fatal deliveries delete error:', e);
+    }
+
+    // (c) Delete reviews if any
+    try {
+      await supabase
+        .from('reviews')
+        .delete()
+        .eq('order_id', orderId);
+    } catch (e) {
+      // Non-fatal if reviews table doesn't have order_id
+    }
+
+    // (d) Delete order items (CRITICAL: Foreign key referencing orders(id) requires this to be deleted first)
+    try {
+      const { error: itemsErr } = await withSkewRetry(
+        () =>
+          supabase
+            .from('order_items')
+            .delete()
+            .eq('order_id', orderId),
+        3,
+        600
+      );
+
+      if (itemsErr) {
+        console.warn('[orderService] Warning while deleting order_items:', itemsErr);
+      }
+    } catch (e) {
+      console.warn('[orderService] Non-fatal order_items delete exception:', e);
+    }
+
+    // 3. Delete order record from orders table
+    const { error: orderDeleteErr } = await withSkewRetry(
+      () =>
+        supabase
+          .from('orders')
+          .delete()
+          .eq('id', orderId),
+      3,
+      600
+    );
+
+    if (orderDeleteErr) {
+      console.error('[orderService] Failed to delete order from orders table:', orderDeleteErr);
+      throw new Error(orderDeleteErr.message || 'Failed to delete order from database.');
+    }
+
+    // 4. Clear local caches
+    cleanLocalOrderCaches(orderId);
+
+    console.log('[orderService] Order permanently deleted from Supabase backend:', orderId);
+    return { success: true, message: 'Order successfully deleted and removed from user history.' };
+  } catch (err: any) {
+    console.error('[orderService] deleteOrder error:', err);
+    throw new Error(err.message || 'Failed to delete order from backend database.');
+  }
+}
+
+/**
+ * Helper to purge local storage delivery and tracking caches for a deleted order
+ */
+function cleanLocalOrderCaches(orderId: string): void {
+  try {
+    localStorage.removeItem(`gr_admin_tracking_events_v1_${orderId}`);
+    const rawDeliveries = localStorage.getItem('gr_admin_deliveries_v1');
+    if (rawDeliveries) {
+      const parsed = JSON.parse(rawDeliveries);
+      if (parsed[orderId]) {
+        delete parsed[orderId];
+        localStorage.setItem('gr_admin_deliveries_v1', JSON.stringify(parsed));
+      }
+    }
+  } catch (e) {
+    console.warn('[orderService] Error cleaning local order caches:', e);
+  }
+}
+
+/**
+ * Alias for deleteOrder to explicitly delete an order from a user's order history
+ */
+export const deleteUserOrder = deleteOrder;
+
+/**
  * Fetch aggregated statistics for the operations & logistics dashboard.
  */
 export async function fetchDashboardStats(): Promise<OrderDashboardStats> {

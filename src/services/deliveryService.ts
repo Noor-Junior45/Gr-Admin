@@ -604,5 +604,64 @@ CREATE POLICY "Allow authenticated warehouse admins full access to deliveries"
 
 CREATE POLICY "Allow authenticated warehouse admins full access to tracking events"
     ON public.delivery_tracking_events FOR ALL TO authenticated USING (true) WITH CHECK (true);
+
+-- 4. Atomic Order Deletion RPC Function (Safely cleans child records and removes order)
+CREATE OR REPLACE FUNCTION public.delete_order(p_order_id UUID)
+RETURNS json
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+    v_deleted_count INT := 0;
+BEGIN
+    -- 1. Delete tracking events
+    DELETE FROM public.delivery_tracking_events WHERE order_id = p_order_id;
+    
+    -- 2. Delete deliveries
+    DELETE FROM public.deliveries WHERE order_id = p_order_id;
+    
+    -- 3. Delete reviews if table exists
+    BEGIN
+        DELETE FROM public.reviews WHERE order_id = p_order_id;
+    EXCEPTION WHEN undefined_table OR undefined_column THEN
+        -- Non-fatal
+    END;
+
+    -- 4. Delete order items
+    DELETE FROM public.order_items WHERE order_id = p_order_id;
+    
+    -- 5. Delete order from orders table
+    DELETE FROM public.orders WHERE id = p_order_id;
+    GET DIAGNOSTICS v_deleted_count = ROW_COUNT;
+    
+    IF v_deleted_count > 0 THEN
+        RETURN json_build_object('success', true, 'message', 'Order permanently deleted');
+    ELSE
+        RETURN json_build_object('success', false, 'message', 'Order not found or already deleted');
+    END IF;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.delete_order(UUID) TO authenticated, anon;
+
+-- Ensure RLS allows DELETE on orders and order_items
+DO $$ 
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_policies 
+        WHERE tablename = 'orders' AND policyname = 'Allow full delete access to orders'
+    ) THEN
+        CREATE POLICY "Allow full delete access to orders"
+            ON public.orders FOR DELETE TO authenticated, anon USING (true);
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_policies 
+        WHERE tablename = 'order_items' AND policyname = 'Allow full delete access to order_items'
+    ) THEN
+        CREATE POLICY "Allow full delete access to order_items"
+            ON public.order_items FOR DELETE TO authenticated, anon USING (true);
+    END IF;
+END $$;
 `;
 }

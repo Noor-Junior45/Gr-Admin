@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import { Order } from '../types';
-import { fetchOrdersList, updateOrderStatus } from '../services/orderService';
+import { fetchOrdersList, updateOrderStatus, deleteOrder } from '../services/orderService';
 import {
   formatCurrency,
   formatTimeElapsed,
@@ -26,6 +26,7 @@ import {
   XCircle,
   FileText,
   User,
+  Trash2,
 } from 'lucide-react';
 
 export const PendingOrdersPage: React.FC = () => {
@@ -77,6 +78,21 @@ export const PendingOrdersPage: React.FC = () => {
       setOrders((prev) => prev.filter((o) => o.id !== orderId));
     } catch (err: any) {
       alert(err.message || 'Failed to accept order');
+    } finally {
+      setProcessingId(null);
+    }
+  };
+
+  const handleDeleteOrder = async (orderId: string) => {
+    if (!window.confirm(`Permanently delete order #${formatShortId(orderId)} from database? This will completely remove it from user history.`)) {
+      return;
+    }
+    setProcessingId(orderId);
+    try {
+      await deleteOrder(orderId);
+      setOrders((prev) => prev.filter((o) => o.id !== orderId));
+    } catch (err: any) {
+      alert(err.message || 'Failed to delete order.');
     } finally {
       setProcessingId(null);
     }
@@ -312,6 +328,16 @@ export const PendingOrdersPage: React.FC = () => {
                   >
                     Details
                   </Link>
+
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteOrder(order.id)}
+                    disabled={isProcessing}
+                    title="Delete order permanently"
+                    className="p-2 text-rose-500 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 rounded-lg transition cursor-pointer disabled:opacity-50"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
 
                   <button
                     type="button"

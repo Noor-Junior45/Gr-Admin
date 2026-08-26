@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import { Order, DeliveryPartner } from '../types';
-import { fetchOrdersList, updateOrderStatus } from '../services/orderService';
+import { fetchOrdersList, updateOrderStatus, deleteOrder } from '../services/orderService';
 import {
   fetchDeliveryPartners,
   assignDeliveryPartner,
@@ -31,6 +31,7 @@ import {
   Navigation,
   Send,
   Boxes,
+  Trash2,
 } from 'lucide-react';
 
 export const ReadyOrdersPage: React.FC = () => {
@@ -103,6 +104,21 @@ export const ReadyOrdersPage: React.FC = () => {
       setOrders((prev) => prev.filter((o) => o.id !== orderId));
     } catch (err: any) {
       alert(err.message || 'Failed to dispatch order');
+    } finally {
+      setDirectDispatchingId(null);
+    }
+  };
+
+  const handleDeleteOrder = async (orderId: string) => {
+    if (!window.confirm(`Permanently delete order #${formatShortId(orderId)} from database? This will completely remove it from user history.`)) {
+      return;
+    }
+    setDirectDispatchingId(orderId);
+    try {
+      await deleteOrder(orderId);
+      setOrders((prev) => prev.filter((o) => o.id !== orderId));
+    } catch (err: any) {
+      alert(err.message || 'Failed to delete order.');
     } finally {
       setDirectDispatchingId(null);
     }
@@ -292,6 +308,23 @@ export const ReadyOrdersPage: React.FC = () => {
 
                 {/* Card Action Buttons */}
                 <div className="mt-4 pt-3 border-t border-slate-100 flex items-center gap-2">
+                  <Link
+                    to={`/orders/${order.id}`}
+                    className="px-3 py-2 text-xs font-semibold text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-xl transition"
+                  >
+                    View
+                  </Link>
+
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteOrder(order.id)}
+                    disabled={isDispatching}
+                    title="Delete order permanently"
+                    className="p-2 text-rose-500 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 rounded-xl transition cursor-pointer disabled:opacity-50"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+
                   <button
                     type="button"
                     onClick={() => handleDirectDispatch(order.id)}
@@ -308,7 +341,7 @@ export const ReadyOrdersPage: React.FC = () => {
                     className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2 bg-cyan-700 hover:bg-cyan-600 text-white font-bold text-xs rounded-xl shadow-xs transition cursor-pointer active:scale-98"
                   >
                     <UserPlus className="w-3.5 h-3.5" />
-                    <span>Assign Rider & Dispatch</span>
+                    <span>Assign Rider</span>
                     <ArrowRight className="w-3.5 h-3.5 opacity-70" />
                   </button>
                 </div>

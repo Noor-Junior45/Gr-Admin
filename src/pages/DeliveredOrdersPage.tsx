@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import { Order } from '../types';
-import { fetchOrdersList } from '../services/orderService';
+import { fetchOrdersList, deleteOrder } from '../services/orderService';
 import {
   formatCurrency,
   formatDateTime,
@@ -22,6 +22,7 @@ import {
   MapPin,
   Camera,
   FileCheck,
+  Trash2,
 } from 'lucide-react';
 
 export const DeliveredOrdersPage: React.FC = () => {
@@ -62,6 +63,18 @@ export const DeliveredOrdersPage: React.FC = () => {
       supabase.removeChannel(channel);
     };
   }, [loadDeliveredOrders]);
+
+  const handleDeleteOrder = async (orderId: string) => {
+    if (!window.confirm(`Permanently delete order #${formatShortId(orderId)} from database? This will completely remove it from user history.`)) {
+      return;
+    }
+    try {
+      await deleteOrder(orderId);
+      setOrders((prev) => prev.filter((o) => o.id !== orderId));
+    } catch (err: any) {
+      alert(err.message || 'Failed to delete order.');
+    }
+  };
 
   const filteredOrders = orders.filter((o) => {
     if (!searchQuery.trim()) return true;
@@ -245,14 +258,25 @@ export const DeliveredOrdersPage: React.FC = () => {
 
                 {/* Card Action Buttons */}
                 <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setSelectedOrderForSlip(order)}
-                    className="flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-lg transition"
-                  >
-                    <Printer className="w-3.5 h-3.5 text-slate-600" />
-                    <span>Print Invoice</span>
-                  </button>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedOrderForSlip(order)}
+                      className="flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-lg transition"
+                    >
+                      <Printer className="w-3.5 h-3.5 text-slate-600" />
+                      <span>Print</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteOrder(order.id)}
+                      title="Delete order permanently"
+                      className="p-1.5 text-rose-500 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 rounded-lg transition cursor-pointer"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
 
                   <Link
                     to={`/orders/${order.id}`}

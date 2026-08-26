@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import { Order } from '../types';
-import { fetchOrdersList, updateOrderStatus } from '../services/orderService';
+import { fetchOrdersList, updateOrderStatus, deleteOrder } from '../services/orderService';
 import {
   formatCurrency,
   formatDateTime,
@@ -19,6 +19,8 @@ import {
   Phone,
   MapPin,
   ShoppingBag,
+  Trash2,
+  Loader2,
 } from 'lucide-react';
 
 export const CancelledOrdersPage: React.FC = () => {
@@ -68,6 +70,25 @@ export const CancelledOrdersPage: React.FC = () => {
       setOrders((prev) => prev.filter((o) => o.id !== orderId));
     } catch (err: any) {
       alert(err.message || 'Failed to reactivate order');
+    } finally {
+      setProcessingId(null);
+    }
+  };
+
+  const handleDeleteOrder = async (orderId: string) => {
+    if (
+      !window.confirm(
+        `Are you sure you want to permanently delete this order?\n\nThis will remove the order and its items from user history and the system. This cannot be undone.`
+      )
+    ) {
+      return;
+    }
+    setProcessingId(orderId);
+    try {
+      await deleteOrder(orderId);
+      setOrders((prev) => prev.filter((o) => o.id !== orderId));
+    } catch (err: any) {
+      alert(err.message || 'Failed to delete order');
     } finally {
       setProcessingId(null);
     }
@@ -237,15 +258,28 @@ export const CancelledOrdersPage: React.FC = () => {
                     View Details
                   </Link>
 
-                  <button
-                    type="button"
-                    onClick={() => handleReactivate(order.id)}
-                    disabled={isProcessing}
-                    className="flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-slate-800 hover:text-slate-950 bg-slate-100 hover:bg-amber-100 border border-slate-200 hover:border-amber-300 rounded-lg transition cursor-pointer disabled:opacity-50"
-                  >
-                    <RotateCcw className="w-3.5 h-3.5 text-amber-600" />
-                    <span>{isProcessing ? 'Restoring...' : 'Restore Order'}</span>
-                  </button>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteOrder(order.id)}
+                      disabled={isProcessing}
+                      className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-rose-700 hover:text-rose-900 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg transition cursor-pointer disabled:opacity-50"
+                      title="Permanently delete from user history"
+                    >
+                      <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                      <span>Delete</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleReactivate(order.id)}
+                      disabled={isProcessing}
+                      className="flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-slate-800 hover:text-slate-950 bg-slate-100 hover:bg-amber-100 border border-slate-200 hover:border-amber-300 rounded-lg transition cursor-pointer disabled:opacity-50"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5 text-amber-600" />
+                      <span>{isProcessing ? 'Restoring...' : 'Restore'}</span>
+                    </button>
+                  </div>
                 </div>
               </div>
             );

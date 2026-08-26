@@ -179,15 +179,14 @@ export const OrdersListPage: React.FC = () => {
     loadOrders();
   }, [loadOrders]);
 
-  // Realtime subscription to live updates
+  // Realtime subscription: new orders appear instantly without refresh
   useEffect(() => {
     const channel = supabase
-      .channel('orders_page_realtime_sync')
+      .channel('admin_orders_realtime')
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'orders' },
-        (payload) => {
-          console.log('[OrdersListPage] Realtime event:', payload.eventType);
+        () => {
           loadOrders(false);
         }
       )

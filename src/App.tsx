@@ -4,14 +4,21 @@ import { AuthProvider } from './context/AuthContext';
 import { NotificationProvider } from './context/NotificationContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { AdminLayout } from './components/AdminLayout';
+
+// Core Application Pages
 import { LoginPage } from './pages/LoginPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { OrdersListPage } from './pages/OrdersListPage';
-import { OrderDetailPage } from './pages/OrderDetailPage';
-import { ProductsStockPage } from './pages/ProductsStockPage';
+import { PendingOrdersPage } from './pages/PendingOrdersPage';
 import { PackingQueuePage } from './pages/PackingQueuePage';
+import { ReadyOrdersPage } from './pages/ReadyOrdersPage';
+import { DispatchedOrdersPage } from './pages/DispatchedOrdersPage';
+import { DeliveredOrdersPage } from './pages/DeliveredOrdersPage';
+import { CancelledOrdersPage } from './pages/CancelledOrdersPage';
+import { OrderDetailPage } from './pages/OrderDetailPage';
 import { DispatchBoardPage } from './pages/DispatchBoardPage';
 import { DeliveryPartnersPage } from './pages/DeliveryPartnersPage';
+import { ProductsStockPage } from './pages/ProductsStockPage';
 
 export default function App() {
   return (
@@ -19,10 +26,11 @@ export default function App() {
       <AuthProvider>
         <NotificationProvider>
           <Routes>
-            {/* Public Login Screen */}
+            {/* Public Auth Screen */}
             <Route path="/login" element={<LoginPage />} />
 
-            {/* Protected Routes inside Admin Operations Shell */}
+            {/* Protected Operations Portal */}
+            {/* 1. Dashboard */}
             <Route
               path="/"
               element={
@@ -34,6 +42,7 @@ export default function App() {
               }
             />
 
+            {/* 2. All Orders Master Registry */}
             <Route
               path="/orders"
               element={
@@ -45,6 +54,23 @@ export default function App() {
               }
             />
 
+            {/* 3. Stage 1: Pending Review */}
+            <Route
+              path="/pending"
+              element={
+                <ProtectedRoute>
+                  <AdminLayout>
+                    <PendingOrdersPage />
+                  </AdminLayout>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/orders/pending"
+              element={<Navigate to="/pending" replace />}
+            />
+
+            {/* 4. Stage 2: Packing Queue */}
             <Route
               path="/packing"
               element={
@@ -55,7 +81,84 @@ export default function App() {
                 </ProtectedRoute>
               }
             />
+            <Route
+              path="/orders/packing"
+              element={<Navigate to="/packing" replace />}
+            />
 
+            {/* 5. Stage 3: Ready for Rider */}
+            <Route
+              path="/ready"
+              element={
+                <ProtectedRoute>
+                  <AdminLayout>
+                    <ReadyOrdersPage />
+                  </AdminLayout>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/orders/ready"
+              element={<Navigate to="/ready" replace />}
+            />
+            <Route
+              path="/orders/packed"
+              element={<Navigate to="/ready" replace />}
+            />
+
+            {/* 6. Stage 4: Out for Delivery / Dispatched */}
+            <Route
+              path="/dispatched"
+              element={
+                <ProtectedRoute>
+                  <AdminLayout>
+                    <DispatchedOrdersPage />
+                  </AdminLayout>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/orders/dispatched"
+              element={<Navigate to="/dispatched" replace />}
+            />
+            <Route
+              path="/orders/shipped"
+              element={<Navigate to="/dispatched" replace />}
+            />
+
+            {/* 7. Stage 5: Delivered Orders */}
+            <Route
+              path="/delivered"
+              element={
+                <ProtectedRoute>
+                  <AdminLayout>
+                    <DeliveredOrdersPage />
+                  </AdminLayout>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/orders/delivered"
+              element={<Navigate to="/delivered" replace />}
+            />
+
+            {/* 8. Cancelled Orders */}
+            <Route
+              path="/cancelled"
+              element={
+                <ProtectedRoute>
+                  <AdminLayout>
+                    <CancelledOrdersPage />
+                  </AdminLayout>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/orders/cancelled"
+              element={<Navigate to="/cancelled" replace />}
+            />
+
+            {/* 9. Dispatch Board */}
             <Route
               path="/dispatch"
               element={
@@ -67,6 +170,7 @@ export default function App() {
               }
             />
 
+            {/* 10. Delivery Partners / Fleet */}
             <Route
               path="/delivery-partners"
               element={
@@ -78,6 +182,7 @@ export default function App() {
               }
             />
 
+            {/* 11. Order Detail View */}
             <Route
               path="/orders/:id"
               element={
@@ -89,6 +194,7 @@ export default function App() {
               }
             />
 
+            {/* 12. Products & Stock */}
             <Route
               path="/products"
               element={

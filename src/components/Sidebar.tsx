@@ -102,13 +102,31 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   // Determine active state for order stage routes
   const isStageActive = (targetStatus?: string) => {
-    if (location.pathname !== '/orders') return false;
     const currentParams = new URLSearchParams(location.search);
     const s = currentParams.get('status');
+
     if (!targetStatus || targetStatus === 'all') {
-      return !s || s === 'all';
+      return location.pathname === '/orders' && (!s || s === 'all');
     }
-    return s === targetStatus;
+    if (targetStatus === 'pending') {
+      return location.pathname === '/pending' || (location.pathname === '/orders' && s === 'pending');
+    }
+    if (targetStatus === 'packing') {
+      return location.pathname === '/packing' || (location.pathname === '/orders' && s === 'packing');
+    }
+    if (targetStatus === 'packed') {
+      return location.pathname === '/ready' || (location.pathname === '/orders' && s === 'packed');
+    }
+    if (targetStatus === 'shipped') {
+      return location.pathname === '/dispatched' || (location.pathname === '/orders' && s === 'shipped');
+    }
+    if (targetStatus === 'delivered') {
+      return location.pathname === '/delivered' || (location.pathname === '/orders' && s === 'delivered');
+    }
+    if (targetStatus === 'cancelled') {
+      return location.pathname === '/cancelled' || (location.pathname === '/orders' && s === 'cancelled');
+    }
+    return false;
   };
 
   const getRealtimeBadge = () => {
@@ -342,7 +360,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
             {/* 1. Pending Stage */}
             <NavLink
-              to="/orders?status=pending"
+              to="/pending"
               onClick={onCloseMobile}
               className={`flex items-center justify-between px-3 py-2 rounded-xl text-xs sm:text-sm font-medium transition cursor-pointer group ${
                 isStageActive('pending')
@@ -380,7 +398,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
             {/* 2. Packing Stage */}
             <NavLink
-              to="/orders?status=packing"
+              to="/packing"
               onClick={onCloseMobile}
               className={`flex items-center justify-between px-3 py-2 rounded-xl text-xs sm:text-sm font-medium transition cursor-pointer group ${
                 isStageActive('packing')
@@ -414,7 +432,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
             {/* 3. Ready / Packed for Rider */}
             <NavLink
-              to="/orders?status=packed"
+              to="/ready"
               onClick={onCloseMobile}
               className={`flex items-center justify-between px-3 py-2 rounded-xl text-xs sm:text-sm font-medium transition cursor-pointer group ${
                 isStageActive('packed')
@@ -448,7 +466,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
             {/* 4. Out for Delivery / Dispatched */}
             <NavLink
-              to="/orders?status=shipped"
+              to="/dispatched"
               onClick={onCloseMobile}
               className={`flex items-center justify-between px-3 py-2 rounded-xl text-xs sm:text-sm font-medium transition cursor-pointer group ${
                 isStageActive('shipped')
@@ -482,7 +500,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
             {/* 5. Delivered */}
             <NavLink
-              to="/orders?status=delivered"
+              to="/delivered"
               onClick={onCloseMobile}
               className={`flex items-center justify-between px-3 py-2 rounded-xl text-xs sm:text-sm font-medium transition cursor-pointer group ${
                 isStageActive('delivered')
@@ -514,7 +532,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
             {/* 6. Cancelled */}
             <NavLink
-              to="/orders?status=cancelled"
+              to="/cancelled"
               onClick={onCloseMobile}
               className={`flex items-center justify-between px-3 py-2 rounded-xl text-xs sm:text-sm font-medium transition cursor-pointer group ${
                 isStageActive('cancelled')

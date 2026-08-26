@@ -501,6 +501,34 @@ export async function fetchTrackingEvents(orderId: string): Promise<DeliveryTrac
 }
 
 /**
+ * Record Proof of Delivery for an order and update delivery status
+ */
+export async function saveProofOfDelivery(
+  orderId: string,
+  pod: ProofOfDelivery
+): Promise<Delivery> {
+  return updateDeliveryStatus(orderId, 'delivered', {
+    proofOfDelivery: pod,
+  });
+}
+
+/**
+ * Record a failed delivery attempt and failure notes
+ */
+export async function markDeliveryFailed(
+  orderId: string,
+  reason: string,
+  action: 'reschedule' | 'return_to_store' | 'refund' = 'reschedule',
+  notes?: string
+): Promise<Delivery> {
+  return updateDeliveryStatus(orderId, 'failed', {
+    failureReason: reason,
+    failureAction: action,
+    notes,
+  });
+}
+
+/**
  * Generates SQL migration script for Supabase Database
  */
 export function getLogisticsSchemaSQL(): string {

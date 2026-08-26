@@ -88,6 +88,8 @@ export interface OrderItem {
   created_at?: string | null;
 }
 
+export type RefundStatus = 'not_applicable' | 'pending' | 'completed';
+
 export interface Order {
   id: string;
   user_id?: string | null;
@@ -106,6 +108,12 @@ export interface Order {
   packed_at?: string | null;
   shipped_at?: string | null;
   delivered_at?: string | null;
+  cancelled_at?: string | null;
+  cancel_reason?: string | null;
+  cancellation_reason?: string | null;
+  refund_status?: RefundStatus | null;
+  refunded_at?: string | null;
+  stock_restocked?: boolean | null;
   recipient_name: string;
   recipient_phone: string;
   address_line1: string;
@@ -113,7 +121,6 @@ export interface Order {
   city: string;
   state: string;
   coupon_code?: string | null;
-  cancellation_reason?: string | null;
   admin_notes?: string | null;
   // Delivery attachment
   delivery?: Delivery | null;

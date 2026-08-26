@@ -11,6 +11,7 @@ import {
   formatShortId,
   getStatusConfig,
   getPaymentBadge,
+  getRefundBadge,
 } from '../utils/formatters';
 import {
   Search,
@@ -239,97 +240,218 @@ export const OrdersListPage: React.FC = () => {
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
 
   return (
-    <div className="space-y-4 sm:space-y-5">
-      {/* Top Header Box - Modern Enterprise Registry Design */}
+    <div className="space-y-3 sm:space-y-4">
+      {/* 1. Compact Single-Line Header */}
       <div
-        id="order-fulfillment-registry-box"
-        className="bg-white rounded-2xl border border-slate-200/90 p-4 sm:p-5 shadow-xs transition-all"
+        id="orders-compact-header"
+        className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white px-4 py-3 rounded-xl border border-slate-200 shadow-2xs"
       >
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-          <div className="space-y-1.5">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-amber-50 text-amber-900 border border-amber-200/80">
-                <Layers className="w-3 h-3 text-amber-600" />
-                Fulfillment Operations
-              </span>
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200/80">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                Live Sync Active
-              </span>
-            </div>
+        <div className="flex items-center gap-3 flex-wrap">
+          <h1 className="text-lg sm:text-xl font-bold text-slate-900 tracking-tight">
+            Orders
+          </h1>
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-mono-code font-semibold bg-slate-100 text-slate-700 border border-slate-200">
+            {totalCount} {totalCount === 1 ? 'order' : 'orders'}
+          </span>
+          <span className="hidden sm:inline-flex items-center gap-1.5 text-[11px] text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200 font-medium">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+            Live Sync
+          </span>
+        </div>
 
-            <div className="flex items-baseline gap-3 flex-wrap">
-              <h1 className="text-xl sm:text-2xl font-serif-display font-bold text-slate-900 tracking-tight">
-                Order Fulfillment Registry
-              </h1>
-              <span className="text-xs font-mono-code bg-slate-100 text-slate-700 px-2.5 py-0.5 rounded-md border border-slate-200 font-medium">
-                {totalCount} {totalCount === 1 ? 'order' : 'orders'} {statusTab !== 'all' ? `(${statusTab})` : 'total'}
-              </span>
-            </div>
-
-            <p className="text-xs text-slate-500 max-w-2xl leading-relaxed">
-              Real-time central registry for monitoring customer orders, queueing packing workflows, assigning delivery riders, and auditing status transitions.
-            </p>
-          </div>
-
-          {/* Action Toolbar */}
-          <div className="flex items-center gap-2 flex-wrap self-start lg:self-center">
-            {newOrderCountSinceOpen > 0 && (
-              <button
-                id="btn-new-orders-counter"
-                type="button"
-                onClick={() => {
-                  resetNewOrderCount();
-                  loadOrders(true);
-                }}
-                className="flex items-center gap-1.5 px-3 py-2 bg-amber-500 text-slate-950 text-xs font-bold rounded-xl hover:bg-amber-400 transition animate-pulse cursor-pointer shadow-xs border border-amber-400"
-              >
-                <Sparkles className="w-3.5 h-3.5" />
-                <span>+ {newOrderCountSinceOpen} New Orders</span>
-              </button>
-            )}
-
+        {/* Action Toolbar */}
+        <div className="flex items-center gap-2 self-start sm:self-auto">
+          {newOrderCountSinceOpen > 0 && (
             <button
-              id="btn-export-orders-csv"
+              id="btn-new-orders-counter"
               type="button"
-              onClick={handleExportCSV}
-              disabled={orders.length === 0}
-              className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-50 hover:bg-slate-100 text-slate-800 text-xs font-semibold rounded-xl border border-slate-200 transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-2xs active:scale-98"
-              title="Export filtered orders to Excel/CSV"
+              onClick={() => {
+                resetNewOrderCount();
+                loadOrders(true);
+              }}
+              className="flex items-center gap-1 px-2.5 py-1.5 bg-amber-500 text-slate-950 text-xs font-bold rounded-lg hover:bg-amber-400 transition animate-pulse cursor-pointer shadow-2xs"
             >
-              <Download className="w-3.5 h-3.5 text-slate-600" />
-              <span>Export CSV</span>
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>+{newOrderCountSinceOpen} New</span>
             </button>
+          )}
 
-            <button
-              id="btn-sync-fleet-orders"
-              type="button"
-              onClick={() => loadOrders(true)}
-              disabled={refreshing}
-              className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold rounded-xl border border-slate-900 transition cursor-pointer active:scale-98 disabled:opacity-60 shadow-2xs"
-              title="Refresh database records"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 text-slate-200 ${refreshing ? 'animate-spin' : ''}`} />
-              <span>{refreshing ? 'Syncing...' : 'Sync Fleet & Orders'}</span>
-            </button>
-          </div>
+          <button
+            id="btn-export-orders-csv"
+            type="button"
+            onClick={handleExportCSV}
+            disabled={orders.length === 0}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold rounded-lg border border-slate-200 transition cursor-pointer disabled:opacity-50 shadow-2xs"
+            title="Export filtered orders to CSV"
+          >
+            <Download className="w-3.5 h-3.5 text-slate-500" />
+            <span>Export</span>
+          </button>
+
+          <button
+            id="btn-sync-fleet-orders"
+            type="button"
+            onClick={() => loadOrders(true)}
+            disabled={refreshing}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold rounded-lg transition cursor-pointer disabled:opacity-60 shadow-2xs"
+            title="Refresh database records"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 text-slate-300 ${refreshing ? 'animate-spin' : ''}`} />
+            <span>{refreshing ? 'Syncing...' : 'Refresh'}</span>
+          </button>
         </div>
       </div>
 
-      {/* Modern Fulfillment Status-Timeline Stepper */}
-      <StatusTimelineSelector
-        currentStatus={statusTab}
-        statusCounts={statusCounts}
-        onSelectStatus={handleStatusChange}
-        totalOrdersCount={totalCount}
-      />
+      {/* 2. Streamlined Segmented Status Filter Bar */}
+      <div className="bg-white rounded-xl border border-slate-200 p-1.5 shadow-2xs overflow-x-auto custom-scrollbar">
+        <div className="flex items-center gap-1 min-w-max">
+          <button
+            type="button"
+            onClick={() => handleStatusChange('all')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
+              statusTab === 'all'
+                ? 'bg-slate-900 text-white shadow-2xs'
+                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+            }`}
+          >
+            <span>All Orders</span>
+            <span
+              className={`px-1.5 py-0.2 rounded-md text-[10px] font-mono-code font-bold ${
+                statusTab === 'all' ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-600'
+              }`}
+            >
+              {totalCount}
+            </span>
+          </button>
 
-      {/* Search & Filter Control Bar */}
-      <div className="bg-white rounded-xl border border-slate-200 p-3 sm:p-4 shadow-xs space-y-3">
-        <div className="flex flex-col md:flex-row items-stretch md:items-center gap-2.5">
+          <button
+            type="button"
+            onClick={() => handleStatusChange('pending')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
+              statusTab === 'pending'
+                ? 'bg-amber-500 text-slate-950 font-bold shadow-2xs'
+                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+            }`}
+          >
+            <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+            <span>Pending</span>
+            <span
+              className={`px-1.5 py-0.2 rounded-md text-[10px] font-mono-code font-bold ${
+                statusTab === 'pending' ? 'bg-amber-600/30 text-slate-950' : 'bg-amber-100 text-amber-900'
+              }`}
+            >
+              {statusCounts.pending || 0}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleStatusChange('packing')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
+              statusTab === 'packing'
+                ? 'bg-indigo-600 text-white shadow-2xs'
+                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+            }`}
+          >
+            <span className="w-2 h-2 rounded-full bg-indigo-500"></span>
+            <span>Packing</span>
+            <span
+              className={`px-1.5 py-0.2 rounded-md text-[10px] font-mono-code font-bold ${
+                statusTab === 'packing' ? 'bg-indigo-700 text-white' : 'bg-indigo-100 text-indigo-900'
+              }`}
+            >
+              {statusCounts.packing || 0}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleStatusChange('packed')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
+              statusTab === 'packed'
+                ? 'bg-cyan-700 text-white shadow-2xs'
+                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+            }`}
+          >
+            <span className="w-2 h-2 rounded-full bg-cyan-500"></span>
+            <span>Ready</span>
+            <span
+              className={`px-1.5 py-0.2 rounded-md text-[10px] font-mono-code font-bold ${
+                statusTab === 'packed' ? 'bg-cyan-800 text-white' : 'bg-cyan-100 text-cyan-900'
+              }`}
+            >
+              {statusCounts.packed || 0}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleStatusChange('shipped')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
+              statusTab === 'shipped'
+                ? 'bg-sky-600 text-white shadow-2xs'
+                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+            }`}
+          >
+            <span className="w-2 h-2 rounded-full bg-sky-500"></span>
+            <span>In Transit</span>
+            <span
+              className={`px-1.5 py-0.2 rounded-md text-[10px] font-mono-code font-bold ${
+                statusTab === 'shipped' ? 'bg-sky-700 text-white' : 'bg-sky-100 text-sky-900'
+              }`}
+            >
+              {statusCounts.shipped || 0}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleStatusChange('delivered')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
+              statusTab === 'delivered'
+                ? 'bg-emerald-600 text-white shadow-2xs'
+                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+            }`}
+          >
+            <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+            <span>Delivered</span>
+            <span
+              className={`px-1.5 py-0.2 rounded-md text-[10px] font-mono-code font-bold ${
+                statusTab === 'delivered' ? 'bg-emerald-700 text-white' : 'bg-emerald-100 text-emerald-900'
+              }`}
+            >
+              {statusCounts.delivered || 0}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleStatusChange('cancelled')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
+              statusTab === 'cancelled'
+                ? 'bg-rose-600 text-white shadow-2xs'
+                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+            }`}
+          >
+            <span className="w-2 h-2 rounded-full bg-rose-500"></span>
+            <span>Cancelled</span>
+            <span
+              className={`px-1.5 py-0.2 rounded-md text-[10px] font-mono-code font-bold ${
+                statusTab === 'cancelled' ? 'bg-rose-700 text-white' : 'bg-rose-100 text-rose-900'
+              }`}
+            >
+              {statusCounts.cancelled || 0}
+            </span>
+          </button>
+        </div>
+      </div>
+
+      {/* 3. Compact Search & Filter Toolbar */}
+      <div className="bg-white rounded-xl border border-slate-200 p-2.5 sm:p-3 shadow-2xs space-y-2">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
           {/* Search Input */}
           <div className="relative flex-1">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
             <input
               type="text"
               value={searchQuery}
@@ -337,8 +459,8 @@ export const OrdersListPage: React.FC = () => {
                 setSearchQuery(e.target.value);
                 setPage(1);
               }}
-              placeholder="Search by recipient name, phone, order ID, city, pincode..."
-              className="w-full pl-9 pr-8 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs sm:text-sm text-slate-900 placeholder:text-slate-400 focus:outline-hidden focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 font-sans"
+              placeholder="Search recipient name, phone, order ID, or PIN..."
+              className="w-full pl-8 pr-7 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-amber-500 focus:border-amber-500 font-sans"
             />
             {searchQuery && (
               <button
@@ -347,16 +469,16 @@ export const OrdersListPage: React.FC = () => {
                   setSearchQuery('');
                   setPage(1);
                 }}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5 cursor-pointer"
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5 cursor-pointer"
                 title="Clear search"
               >
-                <X className="w-3.5 h-3.5" />
+                <X className="w-3 h-3" />
               </button>
             )}
           </div>
 
-          {/* Quick Filter Selects (Desktop) */}
-          <div className="flex flex-wrap sm:flex-nowrap items-center gap-2">
+          {/* Quick Filter Selects */}
+          <div className="flex items-center gap-1.5 flex-wrap sm:flex-nowrap">
             {/* Payment Status */}
             <select
               value={paymentStatusFilter}
@@ -364,12 +486,12 @@ export const OrdersListPage: React.FC = () => {
                 setPaymentStatusFilter(e.target.value);
                 setPage(1);
               }}
-              className="px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-700 font-medium focus:outline-hidden focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 cursor-pointer"
+              className="px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-700 font-medium focus:outline-none focus:ring-1 focus:ring-amber-500 cursor-pointer"
             >
-              <option value="all">All Payment Statuses</option>
+              <option value="all">All Payment</option>
               <option value="paid">Paid</option>
               <option value="pending">Pending</option>
-              <option value="cod">Cash On Delivery</option>
+              <option value="cod">COD</option>
               <option value="failed">Failed</option>
             </select>
 
@@ -380,10 +502,10 @@ export const OrdersListPage: React.FC = () => {
                 setDateRangeFilter(e.target.value);
                 setPage(1);
               }}
-              className="px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-700 font-medium focus:outline-hidden focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 cursor-pointer"
+              className="px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-700 font-medium focus:outline-none focus:ring-1 focus:ring-amber-500 cursor-pointer"
             >
-              <option value="all">All Time</option>
-              <option value="today">Placed Today</option>
+              <option value="all">All Dates</option>
+              <option value="today">Today</option>
               <option value="last7">Last 7 Days</option>
               <option value="last30">Last 30 Days</option>
               <option value="custom">Custom Date Range...</option>
@@ -393,61 +515,55 @@ export const OrdersListPage: React.FC = () => {
             <select
               value={sortBy}
               onChange={(e) => setSortBy(e.target.value as any)}
-              className="px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-700 font-medium focus:outline-hidden focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 cursor-pointer font-mono-code"
+              className="px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-700 font-medium focus:outline-none focus:ring-1 focus:ring-amber-500 cursor-pointer font-mono-code"
             >
-              <option value="placed_at_desc">Newest First</option>
-              <option value="placed_at_asc">Oldest First</option>
-              <option value="total_desc">Highest Total</option>
-              <option value="total_asc">Lowest Total</option>
-              <option value="status">By Status</option>
+              <option value="placed_at_desc">Newest</option>
+              <option value="placed_at_asc">Oldest</option>
+              <option value="total_desc">Highest ₹</option>
+              <option value="total_asc">Lowest ₹</option>
             </select>
 
-            {/* Clear All Filters Button */}
+            {/* Clear Filters Button */}
             {hasActiveFilters && (
               <button
                 type="button"
                 onClick={handleResetFilters}
-                className="px-2.5 py-2 text-xs font-semibold text-rose-700 hover:text-rose-900 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg transition cursor-pointer flex items-center gap-1"
-                title="Reset all search queries and active filters"
+                className="px-2 py-1.5 text-xs font-semibold text-rose-700 hover:text-rose-900 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg transition cursor-pointer flex items-center gap-1"
+                title="Reset filters"
               >
-                <X className="w-3.5 h-3.5" />
-                <span>Reset</span>
+                <X className="w-3 h-3" />
+                <span className="hidden sm:inline">Reset</span>
               </button>
             )}
           </div>
         </div>
 
-        {/* Custom Date Range Picker inputs if custom selected */}
+        {/* Custom Date Range Picker */}
         {dateRangeFilter === 'custom' && (
-          <div className="pt-2 border-t border-slate-100 flex flex-wrap items-center gap-3 text-xs">
-            <span className="font-semibold text-slate-600">Custom Date Range:</span>
-            <div className="flex items-center gap-2">
-              <label className="text-slate-500">From:</label>
-              <input
-                type="date"
-                value={customStartDate}
-                onChange={(e) => setCustomStartDate(e.target.value)}
-                className="px-2 py-1 bg-slate-50 border border-slate-200 rounded text-xs text-slate-800"
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              <label className="text-slate-500">To:</label>
-              <input
-                type="date"
-                value={customEndDate}
-                onChange={(e) => setCustomEndDate(e.target.value)}
-                className="px-2 py-1 bg-slate-50 border border-slate-200 rounded text-xs text-slate-800"
-              />
-            </div>
+          <div className="pt-2 border-t border-slate-100 flex flex-wrap items-center gap-2 text-xs">
+            <span className="font-semibold text-slate-600">Custom:</span>
+            <input
+              type="date"
+              value={customStartDate}
+              onChange={(e) => setCustomStartDate(e.target.value)}
+              className="px-2 py-1 bg-slate-50 border border-slate-200 rounded text-xs text-slate-800"
+            />
+            <span className="text-slate-400">to</span>
+            <input
+              type="date"
+              value={customEndDate}
+              onChange={(e) => setCustomEndDate(e.target.value)}
+              className="px-2 py-1 bg-slate-50 border border-slate-200 rounded text-xs text-slate-800"
+            />
             <button
               type="button"
               onClick={() => {
                 setPage(1);
                 loadOrders(true);
               }}
-              className="px-3 py-1 bg-amber-500 text-slate-950 font-bold text-xs rounded hover:bg-amber-400 transition cursor-pointer"
+              className="px-2.5 py-1 bg-amber-500 text-slate-950 font-bold text-xs rounded hover:bg-amber-400 transition cursor-pointer"
             >
-              Apply Dates
+              Apply
             </button>
           </div>
         )}
@@ -573,12 +689,23 @@ export const OrdersListPage: React.FC = () => {
 
                         {/* Status */}
                         <td className="py-3.5 px-4 text-center">
-                          <span
-                            className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium border ${statusCfg.bg} ${statusCfg.text} ${statusCfg.border}`}
-                          >
-                            <span className={`w-1.5 h-1.5 rounded-full ${statusCfg.dotBg}`} />
-                            {statusCfg.label}
-                          </span>
+                          <div className="flex flex-col items-center gap-1">
+                            <span
+                              className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium border ${statusCfg.bg} ${statusCfg.text} ${statusCfg.border}`}
+                            >
+                              <span className={`w-1.5 h-1.5 rounded-full ${statusCfg.dotBg}`} />
+                              {statusCfg.label}
+                            </span>
+                            {order.status === 'cancelled' && order.refund_status && order.refund_status !== 'not_applicable' && (
+                              <span
+                                className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold border ${
+                                  getRefundBadge(order.refund_status).pillBg
+                                }`}
+                              >
+                                {getRefundBadge(order.refund_status).label}
+                              </span>
+                            )}
+                          </div>
                         </td>
 
                         {/* Action */}
@@ -610,12 +737,23 @@ export const OrdersListPage: React.FC = () => {
                       <div className="font-mono-code font-bold text-slate-900 text-sm">
                         {formatShortId(order.id)}
                       </div>
-                      <span
-                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium border ${statusCfg.bg} ${statusCfg.text} ${statusCfg.border}`}
-                      >
-                        <span className={`w-1.5 h-1.5 rounded-full ${statusCfg.dotBg}`} />
-                        {statusCfg.label}
-                      </span>
+                      <div className="flex items-center gap-1.5">
+                        {order.status === 'cancelled' && order.refund_status && order.refund_status !== 'not_applicable' && (
+                          <span
+                            className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold border ${
+                              getRefundBadge(order.refund_status).pillBg
+                            }`}
+                          >
+                            {getRefundBadge(order.refund_status).label}
+                          </span>
+                        )}
+                        <span
+                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium border ${statusCfg.bg} ${statusCfg.text} ${statusCfg.border}`}
+                        >
+                          <span className={`w-1.5 h-1.5 rounded-full ${statusCfg.dotBg}`} />
+                          {statusCfg.label}
+                        </span>
+                      </div>
                     </div>
 
                     <div className="flex items-start justify-between gap-2">

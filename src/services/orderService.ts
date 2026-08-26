@@ -286,6 +286,73 @@ export async function updateOrderStatus(
 }
 
 /**
+ * Cancel an order via PostgreSQL RPC `cancel_order`.
+ * Restocks all order items back to inventory, sets status to cancelled,
+ * and sets refund_status based on payment method and status in one transaction.
+ */
+export async function cancelOrderRPC(
+  orderId: string,
+  reason?: string
+): Promise<any> {
+  const { data, error } = await supabase.rpc('cancel_order', {
+    p_order_id: orderId,
+    p_reason: reason || null,
+  });
+
+  if (error) {
+    console.error('[orderService] cancel_order RPC error:', error);
+    throw new Error(error.message || 'Failed to cancel order via database transaction.');
+  }
+
+  // Also log customer timeline tracking event
+  try {
+    await logTrackingEvent({
+      order_id: orderId,
+      stage: 'cancelled',
+      title: 'Order Cancelled & Restocked',
+      description: `Order cancelled. Reason: ${reason || 'Customer / Admin Request'}. Items returned to inventory.`,
+      customer_message: `Your order has been cancelled: ${reason || 'Cancelled'}.`,
+      actor: 'admin',
+    });
+  } catch (logErr) {
+    console.warn('[orderService] Failed to log tracking event for cancellation:', logErr);
+  }
+
+  return data;
+}
+
+/**
+ * Mark a pending refund as completed via PostgreSQL RPC `mark_refund_completed`.
+ * Updates refund_status to 'completed' and sets refunded_at timestamp.
+ */
+export async function markRefundCompletedRPC(orderId: string): Promise<any> {
+  const { data, error } = await supabase.rpc('mark_refund_completed', {
+    p_order_id: orderId,
+  });
+
+  if (error) {
+    console.error('[orderService] mark_refund_completed RPC error:', error);
+    throw new Error(error.message || 'Failed to complete refund via database transaction.');
+  }
+
+  // Log tracking event
+  try {
+    await logTrackingEvent({
+      order_id: orderId,
+      stage: 'refunded',
+      title: 'Refund Processed & Completed',
+      description: 'Admin manually confirmed refund transaction outside the platform.',
+      customer_message: 'Your refund has been completed.',
+      actor: 'admin',
+    });
+  } catch (logErr) {
+    console.warn('[orderService] Failed to log tracking event for refund:', logErr);
+  }
+
+  return data;
+}
+
+/**
  * Fetch aggregated statistics for the operations & logistics dashboard.
  */
 export async function fetchDashboardStats(): Promise<OrderDashboardStats> {

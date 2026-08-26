@@ -294,6 +294,44 @@ export function getPaymentBadge(paymentStatus: string | null | undefined) {
   };
 }
 
+export function getRefundBadge(refundStatus: string | null | undefined) {
+  const norm = (refundStatus || '').toLowerCase();
+  if (norm === 'pending') {
+    return {
+      status: 'pending',
+      label: 'Refund Pending',
+      shortLabel: 'Pending',
+      bg: 'bg-amber-50',
+      text: 'text-amber-900',
+      border: 'border-amber-300',
+      pillBg: 'bg-amber-100 text-amber-900 border-amber-300',
+      dotBg: 'bg-amber-500',
+    };
+  }
+  if (norm === 'completed') {
+    return {
+      status: 'completed',
+      label: 'Refund Completed',
+      shortLabel: 'Refunded',
+      bg: 'bg-emerald-50',
+      text: 'text-emerald-900',
+      border: 'border-emerald-300',
+      pillBg: 'bg-emerald-100 text-emerald-900 border-emerald-300',
+      dotBg: 'bg-emerald-500',
+    };
+  }
+  return {
+    status: 'not_applicable',
+    label: 'No Refund Needed',
+    shortLabel: 'No Refund',
+    bg: 'bg-slate-50',
+    text: 'text-slate-600',
+    border: 'border-slate-200',
+    pillBg: 'bg-slate-100 text-slate-600 border-slate-200',
+    dotBg: 'bg-slate-400',
+  };
+}
+
 /**
  * Calculates human duration string e.g. "18 mins ago" or "2 hrs"
  */

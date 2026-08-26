@@ -1,8 +1,14 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
+import { useAuth } from '../context/AuthContext';
 import { Order, OrderItem, OrderStatus, Delivery, DeliveryTrackingEvent, ProofOfDelivery } from '../types';
-import { fetchOrderById, updateOrderStatus } from '../services/orderService';
+import {
+  fetchOrderById,
+  updateOrderStatus,
+  cancelOrderRPC,
+  markRefundCompletedRPC,
+} from '../services/orderService';
 import {
   fetchDeliveryByOrderId,
   fetchTrackingEvents,
@@ -21,6 +27,7 @@ import {
   formatShortId,
   getStatusConfig,
   getPaymentBadge,
+  getRefundBadge,
 } from '../utils/formatters';
 import {
   ArrowLeft,
@@ -53,11 +60,15 @@ import {
   UserPlus,
   ShieldCheck,
   AlertTriangle,
+  RotateCcw,
+  BadgePercent,
+  CheckCheck,
 } from 'lucide-react';
 
 export const OrderDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { isAdmin } = useAuth();
 
   const [order, setOrder] = useState<Order | null>(null);
   const [items, setItems] = useState<OrderItem[]>([]);
@@ -65,6 +76,7 @@ export const OrderDetailPage: React.FC = () => {
   const [trackingEvents, setTrackingEvents] = useState<DeliveryTrackingEvent[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [updating, setUpdating] = useState<boolean>(false);
+  const [processingRefund, setProcessingRefund] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [auditBanner, setAuditBanner] = useState<{
     type: 'success' | 'error';
@@ -81,6 +93,8 @@ export const OrderDetailPage: React.FC = () => {
   // Modals state
   const [showCancelModal, setShowCancelModal] = useState<boolean>(false);
   const [cancelReason, setCancelReason] = useState<string>('Customer Request');
+  const [customCancelReason, setCustomCancelReason] = useState<string>('');
+  const [cancelModalError, setCancelModalError] = useState<string | null>(null);
   const [showMigrationModal, setShowMigrationModal] = useState<boolean>(false);
   const [showAssignModal, setShowAssignModal] = useState<boolean>(false);
   const [showPodModal, setShowPodModal] = useState<boolean>(false);
@@ -160,6 +174,75 @@ export const OrderDetailPage: React.FC = () => {
 
   const handleFailedSubmit = async (reason: string, action: any, notes?: string) => {
     await handleDeliveryStatusChange('failed', { failureReason: reason, failureAction: action, notes });
+  };
+
+  /**
+   * Execute atomic order cancellation via supabase.rpc('cancel_order')
+   */
+  const handleConfirmCancellation = async () => {
+    if (!order || !id) return;
+    setUpdating(true);
+    setCancelModalError(null);
+
+    const finalReason =
+      cancelReason === 'Other'
+        ? customCancelReason.trim() || 'Other'
+        : customCancelReason.trim()
+        ? `${cancelReason} - ${customCancelReason.trim()}`
+        : cancelReason;
+
+    try {
+      await cancelOrderRPC(id, finalReason);
+      setShowCancelModal(false);
+      setCancelReason('Customer Request');
+      setCustomCancelReason('');
+
+      // Reload order details to refresh inventory & refund status
+      await loadDetails();
+
+      setAuditBanner({
+        type: 'success',
+        message: `Order cancelled and ${items.length} items restocked.`,
+        timestamp: new Date().toLocaleTimeString('en-IN'),
+      });
+    } catch (err: any) {
+      console.error('Error cancelling order via RPC:', err);
+      const msg = err.message || 'Failed to cancel order.';
+      setCancelModalError(msg);
+      setAuditBanner({
+        type: 'error',
+        message: msg,
+        timestamp: new Date().toLocaleTimeString('en-IN'),
+      });
+    } finally {
+      setUpdating(false);
+    }
+  };
+
+  /**
+   * Mark refund as completed via supabase.rpc('mark_refund_completed')
+   */
+  const handleMarkRefundCompleted = async () => {
+    if (!order || !id) return;
+    setProcessingRefund(true);
+    try {
+      await markRefundCompletedRPC(id);
+      await loadDetails();
+      setAuditBanner({
+        type: 'success',
+        message: 'Refund marked as completed.',
+        timestamp: new Date().toLocaleTimeString('en-IN'),
+      });
+    } catch (err: any) {
+      console.error('Error marking refund completed via RPC:', err);
+      setAuditBanner({
+        type: 'error',
+        message: err.message || 'Failed to mark refund completed.',
+        timestamp: new Date().toLocaleTimeString('en-IN'),
+      });
+    } finally {
+      setProcessingRefund(false);
+    }
   };
 
   useEffect(() => {
@@ -373,8 +456,25 @@ export const OrderDetailPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Top Actions: Print Packing Slip + Refresh */}
-        <div className="flex items-center gap-2">
+        {/* Top Actions: Cancel Order + Print Packing Slip + Refresh */}
+        <div className="flex items-center gap-2 flex-wrap">
+          {!['cancelled', 'delivered'].includes(order.status) && (
+            <button
+              id="btn-header-cancel-order"
+              type="button"
+              onClick={() => {
+                setCancelModalError(null);
+                setShowCancelModal(true);
+              }}
+              disabled={updating}
+              className="flex items-center gap-1.5 px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-semibold rounded-lg border border-rose-200 shadow-2xs transition cursor-pointer disabled:opacity-50"
+              title="Cancel this order and restock inventory"
+            >
+              <XCircle className="w-3.5 h-3.5 text-rose-600" />
+              <span>Cancel Order</span>
+            </button>
+          )}
+
           <button
             type="button"
             onClick={handlePrintPackingSlip}
@@ -402,7 +502,10 @@ export const OrderDetailPage: React.FC = () => {
         order={order}
         delivery={delivery}
         onTransitionStatus={handleTransitionStatus}
-        onRequestCancel={() => setShowCancelModal(true)}
+        onRequestCancel={() => {
+          setCancelModalError(null);
+          setShowCancelModal(true);
+        }}
         onRequestAssignRider={() => setShowAssignModal(true)}
         onRequestPod={() => setShowPodModal(true)}
         isUpdating={updating}
@@ -410,8 +513,128 @@ export const OrderDetailPage: React.FC = () => {
 
       {/* Two Column Grid: Recipient/Address/Payment and Order Items Workspace */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-        {/* Left Column (1/3): Recipient, Shipping Address & Financials */}
+        {/* Left Column (1/3): Recipient, Shipping Address, Cancellation/Refund & Financials */}
         <div className="space-y-5">
+          {/* Cancelled Order & Refund Tracking Card */}
+          {order.status === 'cancelled' && (
+            <div
+              id="cancellation-refund-card"
+              className="bg-white rounded-xl border border-rose-200 p-4 sm:p-5 shadow-xs space-y-4"
+            >
+              <div className="flex items-center justify-between border-b border-rose-100 pb-2.5">
+                <h2 className="text-xs font-bold uppercase font-mono-code text-rose-900 tracking-wider flex items-center gap-1.5">
+                  <XCircle className="w-3.5 h-3.5 text-rose-600" />
+                  <span>Cancellation & Refund</span>
+                </h2>
+                {order.refund_status && (
+                  <span
+                    className={`text-[10px] px-2 py-0.5 rounded-full font-bold border ${
+                      getRefundBadge(order.refund_status).pillBg
+                    }`}
+                  >
+                    {getRefundBadge(order.refund_status).label}
+                  </span>
+                )}
+              </div>
+
+              {/* Cancellation Details */}
+              <div className="space-y-2 text-xs">
+                <div className="flex justify-between text-slate-600">
+                  <span>Cancelled At</span>
+                  <span className="font-mono-code font-semibold text-slate-900">
+                    {formatDateTime(order.cancelled_at || order.updated_at)}
+                  </span>
+                </div>
+
+                <div className="flex justify-between text-slate-600">
+                  <span>Reason</span>
+                  <span className="font-medium text-slate-900 text-right max-w-[65%]">
+                    {order.cancel_reason || order.cancellation_reason || 'Not specified'}
+                  </span>
+                </div>
+
+                <div className="flex justify-between text-slate-600">
+                  <span>Stock Status</span>
+                  <span className="font-semibold text-emerald-700 flex items-center gap-1">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                    Restocked to Inventory
+                  </span>
+                </div>
+              </div>
+
+              {/* Refund Status Box */}
+              {order.refund_status === 'pending' && (
+                <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-xl space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5 text-amber-900 font-bold text-xs">
+                      <AlertTriangle className="w-4 h-4 text-amber-600" />
+                      <span>Refund Pending</span>
+                    </div>
+                    <span className="font-mono-code font-bold text-amber-950 text-sm">
+                      {formatCurrency(order.total_amount)}
+                    </span>
+                  </div>
+
+                  <p className="text-[11px] text-amber-800 leading-relaxed">
+                    Customer was charged for this order. A manual refund of{' '}
+                    <strong className="font-mono-code">{formatCurrency(order.total_amount)}</strong>{' '}
+                    needs to be sent to their original payment method.
+                  </p>
+
+                  {isAdmin && (
+                    <div className="pt-2 border-t border-amber-200/80 space-y-1.5">
+                      <button
+                        id="btn-mark-refund-completed"
+                        type="button"
+                        onClick={handleMarkRefundCompleted}
+                        disabled={processingRefund}
+                        className="w-full py-2 px-3 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-lg shadow-xs transition cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50 active:scale-98"
+                      >
+                        {processingRefund ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <CheckCheck className="w-3.5 h-3.5" />
+                        )}
+                        <span>Mark Refund as Completed</span>
+                      </button>
+                      <p className="text-[10px] text-amber-700 text-center italic">
+                        Confirms you've manually processed this refund
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {order.refund_status === 'completed' && (
+                <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5 text-emerald-900 font-bold text-xs">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                      <span>Refund Completed</span>
+                    </div>
+                    <span className="font-mono-code font-bold text-emerald-950 text-sm">
+                      {formatCurrency(order.total_amount)}
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-emerald-800 font-mono-code">
+                    Refunded on: {formatDateTime(order.refunded_at)}
+                  </div>
+                  <p className="text-[10px] text-emerald-700">
+                    Admin confirmed that the manual refund transaction has been executed.
+                  </p>
+                </div>
+              )}
+
+              {order.refund_status === 'not_applicable' && (
+                <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-600 space-y-1">
+                  <div className="font-semibold text-slate-800">No Refund Applicable</div>
+                  <div className="text-[11px] text-slate-500">
+                    This order was placed via COD or unpaid status; no financial refund is required.
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
           {/* Recipient & Contact Details Card */}
           <div className="bg-white rounded-xl border border-slate-200 p-4 sm:p-5 shadow-xs space-y-3">
             <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
@@ -853,45 +1076,68 @@ export const OrderDetailPage: React.FC = () => {
                 <AlertCircle className="w-5 h-5 text-rose-600" />
               </div>
               <div>
-                <h3 className="text-base font-bold text-slate-900">Cancel This Order?</h3>
-                <p className="text-xs text-slate-500">Order ID: {formatShortId(order.id)}</p>
+                <h3 className="text-base font-bold text-slate-900">Cancel Order #{formatShortId(order.id)}?</h3>
+                <p className="text-xs text-slate-500 font-mono-code">{order.id}</p>
               </div>
             </div>
 
-            <p className="text-xs text-slate-600 leading-relaxed">
-              Cancelling this order will mark it as cancelled across the system and dispatch notifications.
-            </p>
+            {/* Crucial Warning Notice */}
+            <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-800 leading-relaxed font-medium">
+              ⚠️ This will cancel the order and automatically restock all items back into inventory.
+            </div>
 
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-slate-700">Reason for Cancellation:</label>
+            {cancelModalError && (
+              <div className="p-3 bg-rose-100 border border-rose-300 text-rose-900 text-xs rounded-lg flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                <span>{cancelModalError}</span>
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <label className="text-xs font-semibold text-slate-700">Reason for Cancellation (Optional):</label>
               <select
                 value={cancelReason}
                 onChange={(e) => setCancelReason(e.target.value)}
-                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-800"
+                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-rose-500"
               >
                 <option value="Customer Request">Customer requested cancellation</option>
                 <option value="Out of Stock">Item out of stock</option>
                 <option value="Delivery Unserviceable">Delivery address unserviceable</option>
                 <option value="Payment Issue">Payment failed / unverified</option>
                 <option value="Duplicate Order">Duplicate order placed</option>
+                <option value="Other">Other reason...</option>
               </select>
+
+              <input
+                type="text"
+                value={customCancelReason}
+                onChange={(e) => setCustomCancelReason(e.target.value)}
+                placeholder="Additional notes / specifics (optional)..."
+                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-rose-500"
+              />
             </div>
 
             <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-2">
               <button
                 type="button"
-                onClick={() => setShowCancelModal(false)}
+                onClick={() => {
+                  setShowCancelModal(false);
+                  setCancelModalError(null);
+                }}
+                disabled={updating}
                 className="px-3.5 py-2 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition cursor-pointer"
               >
                 Keep Order
               </button>
               <button
+                id="btn-confirm-cancel-order"
                 type="button"
-                onClick={() => handleTransitionStatus('cancelled')}
+                onClick={handleConfirmCancellation}
                 disabled={updating}
-                className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-lg transition cursor-pointer disabled:opacity-50"
+                className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-lg transition cursor-pointer disabled:opacity-50 flex items-center gap-1.5 active:scale-98"
               >
-                {updating ? 'Processing...' : 'Confirm Cancellation'}
+                {updating && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                <span>{updating ? 'Cancelling & Restocking...' : 'Confirm Cancellation'}</span>
               </button>
             </div>
           </div>

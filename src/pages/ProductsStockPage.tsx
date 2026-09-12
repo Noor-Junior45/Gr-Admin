@@ -57,17 +57,14 @@ export const ProductsStockPage: React.FC = () => {
   return (
     <div className="space-y-5">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-4 rounded-xl border border-slate-200/80 shadow-xs">
         <div>
-          <h1 className="text-xl sm:text-2xl font-serif-display font-bold text-slate-900 flex items-center gap-2">
-            <span>Inventory & Stock Catalog</span>
-            <span className="text-xs font-mono-code bg-slate-100 text-slate-700 px-2 py-0.5 rounded border border-slate-200 font-normal">
-              {totalCount} products
+          <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight flex items-center gap-2">
+            <span>Products & Stock</span>
+            <span className="text-xs font-mono-code bg-slate-100 text-slate-700 px-2.5 py-0.5 rounded-md font-semibold">
+              {totalCount} items
             </span>
           </h1>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Monitor real-time warehouse stock quantities and availability flags.
-          </p>
         </div>
 
         <div className="flex items-center gap-2">
@@ -75,10 +72,10 @@ export const ProductsStockPage: React.FC = () => {
             type="button"
             onClick={() => loadProducts(true)}
             disabled={refreshing}
-            className="flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-medium rounded-lg border border-slate-200 transition cursor-pointer"
+            className="flex items-center gap-1.5 px-3 py-2 bg-slate-50 hover:bg-slate-100 text-slate-700 text-xs font-medium rounded-lg border border-slate-200 transition cursor-pointer"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} />
-            <span>{refreshing ? 'Refreshing...' : 'Refresh Stock'}</span>
+            <span>{refreshing ? 'Refreshing...' : 'Refresh'}</span>
           </button>
         </div>
       </div>

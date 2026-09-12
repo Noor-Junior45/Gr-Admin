@@ -1,58 +1,50 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Truck,
   UserPlus,
-  PackageCheck,
   MapPin,
   Clock,
   CheckCircle2,
   AlertTriangle,
-  RefreshCw,
   Phone,
   ShieldCheck,
-  Search,
-  Database,
-  ArrowRight,
-  Send,
-  Boxes,
-  Users,
+  ExternalLink,
+  ChevronRight,
 } from 'lucide-react';
-import { Order, Delivery, DeliveryPartner, ProofOfDelivery } from '../types';
+import { Order, DeliveryPartner, ProofOfDelivery } from '../types';
 import { fetchOrdersList } from '../services/orderService';
 import {
   fetchDeliveryPartners,
   assignDeliveryPartner,
   updateDeliveryStatus,
 } from '../services/deliveryService';
+import { supabase } from '../lib/supabaseClient';
 import {
   formatCurrency,
   formatTimeElapsed,
   formatTimeOnly,
   formatShortId,
-  formatDateTime,
 } from '../utils/formatters';
 import { AssignPartnerModal } from '../components/AssignPartnerModal';
 import { ProofOfDeliveryModal } from '../components/ProofOfDeliveryModal';
 import { FailedDeliveryModal } from '../components/FailedDeliveryModal';
-import { SchemaMigrationModal } from '../components/SchemaMigrationModal';
+
+type LaneKey = 'unassigned' | 'assigned' | 'in_transit' | 'delivered' | 'failed';
 
 export const DispatchBoardPage: React.FC = () => {
   const [orders, setOrders] = useState<Order[]>([]);
   const [partners, setPartners] = useState<DeliveryPartner[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [activePartnerFilter, setActivePartnerFilter] = useState('all');
 
   // Modals state
   const [assignModalOrder, setAssignModalOrder] = useState<Order | null>(null);
   const [podModalOrder, setPodModalOrder] = useState<Order | null>(null);
   const [failedModalOrder, setFailedModalOrder] = useState<Order | null>(null);
-  const [isSchemaModalOpen, setIsSchemaModalOpen] = useState(false);
   const [processingOrderId, setProcessingOrderId] = useState<string | null>(null);
 
-  const loadData = async () => {
-    setIsLoading(true);
+  const loadData = useCallback(async (isSilent = false) => {
+    if (!isSilent) setIsLoading(true);
     try {
       const [orderRes, partnerList] = await Promise.all([
         fetchOrdersList({ pageSize: 150 }),
@@ -65,27 +57,56 @@ export const DispatchBoardPage: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     loadData();
-  }, []);
+
+    // Listen to real-time changes on orders
+    const channel = supabase
+      .channel('dispatch_board_realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => {
+        loadData(true);
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [loadData]);
 
   // Dispatch lifecycle handlers
-  const handleAssignSubmit = async (partnerId: string, estimatedMinutes: number, notes?: string) => {
+  const handleAssignSubmit = async (
+    partnerId: string,
+    estimatedMinutes: number,
+    notes?: string
+  ) => {
     if (!assignModalOrder) return;
-    const updatedDelivery = await assignDeliveryPartner(
-      assignModalOrder.id,
-      partnerId,
-      estimatedMinutes,
-      notes
-    );
-    setOrders((prev) =>
-      prev.map((o) => (o.id === assignModalOrder.id ? { ...o, delivery: updatedDelivery } : o))
-    );
+    try {
+      const updatedDelivery = await assignDeliveryPartner(
+        assignModalOrder.id,
+        partnerId,
+        estimatedMinutes,
+        notes
+      );
+      setOrders((prev) =>
+        prev.map((o) =>
+          o.id === assignModalOrder.id
+            ? { ...o, status: 'packed', delivery: updatedDelivery }
+            : o
+        )
+      );
+      setAssignModalOrder(null);
+    } catch (err: any) {
+      alert(err.message || 'Failed to assign rider');
+    }
   };
 
-  const handleStatusProgression = async (orderId: string, nextStatus: any, extra?: any) => {
+  const handleStatusProgression = async (
+    orderId: string,
+    nextStatus: any,
+    extra?: any
+  ) => {
     setProcessingOrderId(orderId);
     try {
       const updatedDelivery = await updateDeliveryStatus(orderId, nextStatus, extra);
@@ -93,7 +114,11 @@ export const DispatchBoardPage: React.FC = () => {
         prev.map((o) => {
           if (o.id === orderId) {
             let updatedOrderStatus = o.status;
-            if (nextStatus === 'picked_up' || nextStatus === 'out_for_delivery' || nextStatus === 'near_destination') {
+            if (
+              nextStatus === 'picked_up' ||
+              nextStatus === 'out_for_delivery' ||
+              nextStatus === 'near_destination'
+            ) {
               updatedOrderStatus = 'shipped';
             } else if (nextStatus === 'delivered') {
               updatedOrderStatus = 'delivered';
@@ -118,7 +143,12 @@ export const DispatchBoardPage: React.FC = () => {
 
   const handlePodSubmit = async (pod: ProofOfDelivery) => {
     if (!podModalOrder) return;
-    await handleStatusProgression(podModalOrder.id, 'delivered', { proofOfDelivery: pod });
+    try {
+      await handleStatusProgression(podModalOrder.id, 'delivered', { proofOfDelivery: pod });
+      setPodModalOrder(null);
+    } catch (err: any) {
+      alert(err.message || 'Failed to record POD');
+    }
   };
 
   const handleFailedSubmit = async (
@@ -127,11 +157,16 @@ export const DispatchBoardPage: React.FC = () => {
     notes?: string
   ) => {
     if (!failedModalOrder) return;
-    await handleStatusProgression(failedModalOrder.id, 'failed', {
-      failureReason: reason,
-      failureAction: action,
-      notes,
-    });
+    try {
+      await handleStatusProgression(failedModalOrder.id, 'failed', {
+        failureReason: reason,
+        failureAction: action,
+        notes,
+      });
+      setFailedModalOrder(null);
+    } catch (err: any) {
+      alert(err.message || 'Failed to report delivery issue');
+    }
   };
 
   // Group orders into Kanban lanes
@@ -152,7 +187,9 @@ export const DispatchBoardPage: React.FC = () => {
       o.delivery?.status === 'picked_up' ||
       o.delivery?.status === 'out_for_delivery' ||
       o.delivery?.status === 'near_destination' ||
-      (o.status === 'shipped' && o.delivery?.status !== 'delivered' && o.delivery?.status !== 'failed')
+      (o.status === 'shipped' &&
+        o.delivery?.status !== 'delivered' &&
+        o.delivery?.status !== 'failed')
   );
 
   const deliveredOrders = orders.filter(
@@ -163,410 +200,328 @@ export const DispatchBoardPage: React.FC = () => {
     (o) => o.status === 'failed' || o.delivery?.status === 'failed'
   );
 
-  return (
-    <div className="space-y-6 pb-12">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <h1 className="font-serif-display font-bold text-slate-900 text-2xl tracking-tight">
-              Logistics & Delivery Dispatch Board
-            </h1>
-            <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200">
-              Live Fleet Hub
-            </span>
-          </div>
-          <p className="text-sm text-slate-500 mt-1">
-            Assign fleet riders, track live transit milestones, trigger ETA near alerts, and verify proof of delivery.
-          </p>
-        </div>
+  // Lane Configuration Definitions
+  const lanes = [
+    {
+      key: 'unassigned' as const,
+      title: 'Packed / Unassigned',
+      count: unassignedOrders.length,
+      dotColor: 'bg-slate-400',
+      badgeBg: 'bg-slate-100 text-slate-700',
+      orders: unassignedOrders,
+      emptyText: 'No packed orders waiting for rider assignment',
+    },
+    {
+      key: 'assigned' as const,
+      title: 'Rider Assigned',
+      count: assignedOrders.length,
+      dotColor: 'bg-cyan-500',
+      badgeBg: 'bg-cyan-100 text-cyan-800',
+      orders: assignedOrders,
+      emptyText: 'No assigned parcels currently awaiting pickup',
+    },
+    {
+      key: 'in_transit' as const,
+      title: 'Out for Delivery',
+      count: inTransitOrders.length,
+      dotColor: 'bg-blue-600 animate-pulse',
+      badgeBg: 'bg-blue-100 text-blue-800',
+      orders: inTransitOrders,
+      emptyText: 'No parcels currently in transit on the road',
+    },
+    {
+      key: 'delivered' as const,
+      title: 'Delivered & POD',
+      count: deliveredOrders.length,
+      dotColor: 'bg-emerald-500',
+      badgeBg: 'bg-emerald-100 text-emerald-800',
+      orders: deliveredOrders,
+      emptyText: 'No deliveries recorded yet',
+    },
+    {
+      key: 'failed' as const,
+      title: 'Action Needed',
+      count: failedOrders.length,
+      dotColor: 'bg-rose-500',
+      badgeBg: 'bg-rose-100 text-rose-800',
+      orders: failedOrders,
+      emptyText: 'No delivery issues reported',
+    },
+  ];
 
-        <div className="flex items-center gap-2.5 flex-wrap">
-          <button
-            type="button"
-            onClick={() => setIsSchemaModalOpen(true)}
-            className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 shadow-xs transition"
-          >
-            <Database className="w-3.5 h-3.5 text-amber-600" />
-            Database Schema (SQL)
-          </button>
+  // Render individual dispatch order card
+  const renderCard = (order: Order, laneKey: LaneKey) => {
+    const isProcessing = processingOrderId === order.id;
+    const partner = order.delivery?.delivery_partner;
+    const isNearDestination = order.delivery?.status === 'near_destination';
+    const pod = order.delivery?.proof_of_delivery;
+
+    return (
+      <div
+        key={order.id}
+        className={`bg-white border rounded-xl p-4 shadow-2xs hover:shadow-xs transition-all space-y-3 ${
+          isNearDestination
+            ? 'border-amber-400 ring-2 ring-amber-400/20 bg-amber-50/10'
+            : laneKey === 'failed'
+            ? 'border-rose-200 hover:border-rose-300'
+            : laneKey === 'delivered'
+            ? 'border-emerald-200/80 hover:border-emerald-300'
+            : laneKey === 'assigned'
+            ? 'border-cyan-200/90 hover:border-cyan-300'
+            : laneKey === 'in_transit'
+            ? 'border-blue-200/90 hover:border-blue-300'
+            : 'border-slate-200/90 hover:border-slate-300'
+        }`}
+      >
+        {/* Card Header: Order ID + Placed Time + Amount */}
+        <div className="flex items-center justify-between gap-2">
           <Link
-            to="/delivery-partners"
-            className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 shadow-xs transition"
+            to={`/orders/${order.id}`}
+            className="font-mono-code font-bold text-xs text-slate-900 hover:text-blue-600 flex items-center gap-1 transition"
           >
-            <Users className="w-3.5 h-3.5 text-cyan-600" />
-            Manage Riders ({partners.length})
+            <span>{formatShortId(order.id)}</span>
+            <ExternalLink className="w-3 h-3 text-slate-400" />
           </Link>
-          <button
-            type="button"
-            onClick={loadData}
-            disabled={isLoading}
-            className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-lg shadow-xs transition"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
-            Refresh Board
-          </button>
+
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-mono-code text-slate-400">
+              {formatTimeElapsed(order.placed_at)}
+            </span>
+            <span className="font-mono-code font-bold text-xs text-slate-900 bg-slate-100 px-2 py-0.5 rounded-md">
+              {formatCurrency(order.total_amount)}
+            </span>
+          </div>
+        </div>
+
+        {/* Customer & Destination Details Box */}
+        <div className="bg-slate-50/80 rounded-lg p-2.5 space-y-1.5 border border-slate-100">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs font-bold text-slate-900 truncate">
+              {order.recipient_name || 'Valued Customer'}
+            </span>
+            {order.recipient_phone && (
+              <a
+                href={`tel:${order.recipient_phone}`}
+                className="inline-flex items-center gap-1 text-[11px] font-mono-code text-slate-600 hover:text-blue-600"
+                title="Call recipient"
+              >
+                <Phone className="w-3 h-3 text-slate-400" />
+                <span>{order.recipient_phone}</span>
+              </a>
+            )}
+          </div>
+
+          <div className="flex items-start gap-1.5 text-[11px] text-slate-600 leading-snug">
+            <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0 mt-0.5" />
+            <span className="line-clamp-2">
+              {order.address_line1}
+              {order.city ? `, ${order.city}` : ''}
+              {order.pincode ? ` - ${order.pincode}` : ''}
+            </span>
+          </div>
+        </div>
+
+        {/* Rider Info Box (if assigned or in transit) */}
+        {partner && (
+          <div className="bg-cyan-50/50 border border-cyan-100 rounded-lg p-2.5 text-xs space-y-1">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5 font-semibold text-cyan-950 truncate">
+                <Truck className="w-3.5 h-3.5 text-cyan-700 shrink-0" />
+                <span className="truncate">{partner.name}</span>
+              </div>
+              <span className="text-[10px] font-mono-code uppercase bg-cyan-100/70 text-cyan-800 px-1.5 py-0.5 rounded shrink-0">
+                {partner.vehicle_type || 'Rider'}
+              </span>
+            </div>
+
+            <div className="flex items-center justify-between text-[11px] text-cyan-800/80 pt-0.5">
+              {partner.phone ? (
+                <a
+                  href={`tel:${partner.phone}`}
+                  className="hover:underline flex items-center gap-1"
+                >
+                  <Phone className="w-3 h-3 text-cyan-600" />
+                  <span>{partner.phone}</span>
+                </a>
+              ) : (
+                <span className="text-slate-400">No phone on file</span>
+              )}
+
+              {order.delivery?.estimated_delivery_at && (
+                <span className="font-mono-code text-[10px] flex items-center gap-1 text-cyan-900 font-medium">
+                  <Clock className="w-3 h-3 text-cyan-600" />
+                  ETA: {formatTimeOnly(order.delivery.estimated_delivery_at)}
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Proof of Delivery Info Box (Delivered Lane) */}
+        {pod && (
+          <div className="bg-emerald-50/70 border border-emerald-200/80 rounded-lg p-2.5 text-[11px] space-y-1">
+            <div className="flex items-center justify-between font-semibold text-emerald-900">
+              <span className="flex items-center gap-1">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                <span>Received by: {pod.recipient_name || order.recipient_name}</span>
+              </span>
+              <span className="text-[10px] font-mono-code uppercase bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded">
+                {pod.method}
+              </span>
+            </div>
+            {order.delivered_at && (
+              <div className="text-slate-500 font-mono-code text-[10px]">
+                Completed: {formatTimeOnly(order.delivered_at)}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Delivery Failure Info Box (Action Needed Lane) */}
+        {laneKey === 'failed' && (
+          <div className="bg-rose-50/80 border border-rose-200 rounded-lg p-2.5 text-xs space-y-1">
+            <div className="flex items-center gap-1.5 font-bold text-rose-900">
+              <AlertTriangle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+              <span>Issue: {order.delivery?.failure_reason || 'Delivery uncompleted'}</span>
+            </div>
+            <div className="text-[11px] text-rose-800">
+              Next Action: <span className="font-semibold">{order.delivery?.failure_action || 'Reschedule'}</span>
+            </div>
+          </div>
+        )}
+
+        {/* Action Buttons Box */}
+        <div className="pt-2 border-t border-slate-100">
+          {laneKey === 'unassigned' && (
+            <button
+              type="button"
+              onClick={() => setAssignModalOrder(order)}
+              className="w-full flex items-center justify-center gap-1.5 py-2 px-3 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-lg shadow-2xs transition cursor-pointer"
+            >
+              <UserPlus className="w-3.5 h-3.5" />
+              <span>Assign Delivery Rider</span>
+            </button>
+          )}
+
+          {laneKey === 'assigned' && (
+            <button
+              type="button"
+              disabled={isProcessing}
+              onClick={() => handleStatusProgression(order.id, 'picked_up')}
+              className="w-full flex items-center justify-center gap-1.5 py-2 px-3 text-xs font-semibold text-white bg-sky-600 hover:bg-sky-700 rounded-lg shadow-2xs transition cursor-pointer disabled:opacity-50"
+            >
+              <Truck className={`w-3.5 h-3.5 ${isProcessing ? 'animate-bounce' : ''}`} />
+              <span>{isProcessing ? 'Marking...' : 'Mark Picked Up (Dispatched)'}</span>
+            </button>
+          )}
+
+          {laneKey === 'in_transit' && (
+            <div className="space-y-2">
+              {!isNearDestination ? (
+                <button
+                  type="button"
+                  disabled={isProcessing}
+                  onClick={() =>
+                    handleStatusProgression(order.id, 'near_destination', {
+                      locationName: order.city,
+                    })
+                  }
+                  className="w-full flex items-center justify-center gap-1.5 py-1.5 px-3 text-xs font-medium text-amber-900 bg-amber-50 hover:bg-amber-100 border border-amber-300 rounded-lg transition cursor-pointer disabled:opacity-50"
+                >
+                  <MapPin className="w-3.5 h-3.5 text-amber-600" />
+                  <span>Send "Rider Nearby" Alert</span>
+                </button>
+              ) : (
+                <div className="w-full py-1 text-[11px] font-medium text-amber-900 bg-amber-100/70 border border-amber-200 rounded-lg text-center">
+                  Customer notified: Rider nearby
+                </div>
+              )}
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={isProcessing}
+                  onClick={() => setPodModalOrder(order)}
+                  className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-2xs transition cursor-pointer"
+                >
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  <span>Mark Delivered</span>
+                </button>
+
+                <button
+                  type="button"
+                  disabled={isProcessing}
+                  onClick={() => setFailedModalOrder(order)}
+                  className="py-2 px-3 text-xs font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg transition cursor-pointer"
+                  title="Report Delivery Issue"
+                >
+                  Issue
+                </button>
+              </div>
+            </div>
+          )}
+
+          {laneKey === 'delivered' && (
+            <Link
+              to={`/orders/${order.id}`}
+              className="w-full flex items-center justify-center gap-1 py-1.5 px-3 text-xs font-semibold text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg transition"
+            >
+              <span>View Order Record</span>
+              <ChevronRight className="w-3.5 h-3.5" />
+            </Link>
+          )}
+
+          {laneKey === 'failed' && (
+            <button
+              type="button"
+              onClick={() => setAssignModalOrder(order)}
+              className="w-full flex items-center justify-center gap-1.5 py-2 px-3 text-xs font-semibold text-rose-900 bg-rose-50 hover:bg-rose-100 border border-rose-300 rounded-lg transition cursor-pointer"
+            >
+              <UserPlus className="w-3.5 h-3.5 text-rose-700" />
+              <span>Reschedule / Reassign Rider</span>
+            </button>
+          )}
         </div>
       </div>
+    );
+  };
 
-      {/* Filter Row */}
-      <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs">
-        <div className="relative w-full sm:max-w-xs">
-          <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search parcel ID, customer, phone..."
-            className="w-full pl-9 pr-4 py-1.5 text-xs border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-          />
-        </div>
-
-        <div className="flex items-center gap-2 w-full sm:w-auto">
-          <span className="text-xs text-slate-500 font-medium whitespace-nowrap">Filter Rider:</span>
-          <select
-            value={activePartnerFilter}
-            onChange={(e) => setActivePartnerFilter(e.target.value)}
-            className="px-2.5 py-1.5 text-xs border border-slate-300 rounded-lg bg-white text-slate-700 font-medium focus:outline-hidden"
+  return (
+    <div className="pb-12">
+      {/* Kanban Dispatch Columns Container */}
+      <div className="flex gap-4 overflow-x-auto pb-6 pt-1 items-start">
+        {lanes.map((lane) => (
+          <div
+            key={lane.key}
+            className="w-80 min-w-[310px] max-w-[340px] shrink-0 bg-slate-100/70 border border-slate-200/90 rounded-2xl p-3 space-y-3 min-h-[520px] flex flex-col"
           >
-            <option value="all">All Fleet Riders</option>
-            {partners.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name} ({p.vehicle_type})
-              </option>
-            ))}
-          </select>
-        </div>
-      </div>
-
-      {/* Kanban Dispatch Columns */}
-      <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4 items-start">
-        {/* Column 1: Unassigned Orders */}
-        <div className="bg-slate-100/70 border border-slate-200 rounded-2xl p-3.5 space-y-3 min-h-[500px]">
-          <div className="flex items-center justify-between pb-2 border-b border-slate-200">
-            <div className="flex items-center gap-2">
-              <span className="w-2.5 h-2.5 rounded-full bg-slate-400" />
-              <h3 className="font-semibold text-slate-800 text-xs uppercase font-mono-code">
-                1. Packed / Unassigned
-              </h3>
-            </div>
-            <span className="px-2 py-0.5 bg-white text-slate-700 rounded-full text-xs font-mono-code font-bold shadow-xs">
-              {unassignedOrders.length}
-            </span>
-          </div>
-
-          <div className="space-y-3">
-            {unassignedOrders.map((order) => (
-              <div
-                key={order.id}
-                className="bg-white border border-slate-200 rounded-xl p-3.5 shadow-xs space-y-2.5 hover:border-slate-300 transition"
-              >
-                <div className="flex items-center justify-between">
-                  <Link
-                    to={`/orders/${order.id}`}
-                    className="font-mono-code font-bold text-xs text-slate-900 hover:text-blue-600"
-                  >
-                    {formatShortId(order.id)}
-                  </Link>
-                  <span className="text-[10px] font-mono-code text-slate-400">
-                    {formatTimeElapsed(order.placed_at)}
-                  </span>
-                </div>
-
-                <div>
-                  <div className="text-xs font-semibold text-slate-900">{order.recipient_name}</div>
-                  <div className="text-[11px] text-slate-500 truncate">
-                    {order.address_line1}, {order.pincode}
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-between text-xs pt-2 border-t border-slate-100">
-                  <span className="font-mono-code font-bold text-slate-900">
-                    {formatCurrency(order.total_amount)}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setAssignModalOrder(order)}
-                    className="flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-cyan-900 bg-cyan-50 hover:bg-cyan-100 border border-cyan-200 rounded-lg transition"
-                  >
-                    <UserPlus className="w-3.5 h-3.5" /> Assign Rider
-                  </button>
-                </div>
+            {/* Lane Header */}
+            <div className="flex items-center justify-between pb-2.5 border-b border-slate-200/80">
+              <div className="flex items-center gap-2">
+                <span className={`w-2.5 h-2.5 rounded-full ${lane.dotColor}`} />
+                <h3 className="font-bold text-slate-800 text-xs uppercase tracking-wider font-mono-code">
+                  {lane.title}
+                </h3>
               </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Column 2: Rider Assigned (Awaiting Pickup) */}
-        <div className="bg-cyan-50/40 border border-cyan-200/80 rounded-2xl p-3.5 space-y-3 min-h-[500px]">
-          <div className="flex items-center justify-between pb-2 border-b border-cyan-200">
-            <div className="flex items-center gap-2">
-              <span className="w-2.5 h-2.5 rounded-full bg-cyan-500" />
-              <h3 className="font-semibold text-cyan-950 text-xs uppercase font-mono-code">
-                2. Rider Assigned
-              </h3>
-            </div>
-            <span className="px-2 py-0.5 bg-white text-cyan-800 rounded-full text-xs font-mono-code font-bold shadow-xs">
-              {assignedOrders.length}
-            </span>
-          </div>
-
-          <div className="space-y-3">
-            {assignedOrders.map((order) => {
-              const partner = order.delivery?.delivery_partner;
-              return (
-                <div
-                  key={order.id}
-                  className="bg-white border border-cyan-200 rounded-xl p-3.5 shadow-xs space-y-2.5"
-                >
-                  <div className="flex items-center justify-between">
-                    <Link
-                      to={`/orders/${order.id}`}
-                      className="font-mono-code font-bold text-xs text-slate-900 hover:text-cyan-700"
-                    >
-                      {formatShortId(order.id)}
-                    </Link>
-                    <span className="text-[10px] font-mono-code text-cyan-700 bg-cyan-50 px-1.5 py-0.5 rounded">
-                      Assigned
-                    </span>
-                  </div>
-
-                  {/* Rider Profile Card in Column */}
-                  <div className="p-2 rounded-lg bg-cyan-50/50 border border-cyan-100 text-xs space-y-1">
-                    <div className="font-semibold text-cyan-950">{partner?.name || 'Rider Assigned'}</div>
-                    <div className="flex items-center gap-1 text-[11px] text-slate-500">
-                      <Phone className="w-3 h-3 text-slate-400" />
-                      <span>{partner?.phone || 'Contact on file'}</span>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-between text-xs pt-2 border-t border-slate-100">
-                    <span className="font-mono-code font-semibold text-slate-700">
-                      {order.recipient_name}
-                    </span>
-                    <button
-                      type="button"
-                      disabled={processingOrderId === order.id}
-                      onClick={() => handleStatusProgression(order.id, 'picked_up')}
-                      className="flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-white bg-sky-600 hover:bg-sky-700 rounded-lg shadow-xs transition"
-                    >
-                      <Truck className="w-3.5 h-3.5" /> Mark Picked Up
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Column 3: Out For Delivery / On The Way / Near Destination */}
-        <div className="bg-blue-50/40 border border-blue-200/80 rounded-2xl p-3.5 space-y-3 min-h-[500px]">
-          <div className="flex items-center justify-between pb-2 border-b border-blue-200">
-            <div className="flex items-center gap-2">
-              <span className="w-2.5 h-2.5 rounded-full bg-blue-600 animate-pulse" />
-              <h3 className="font-semibold text-blue-950 text-xs uppercase font-mono-code">
-                3. Out for Delivery
-              </h3>
-            </div>
-            <span className="px-2 py-0.5 bg-white text-blue-800 rounded-full text-xs font-mono-code font-bold shadow-xs">
-              {inTransitOrders.length}
-            </span>
-          </div>
-
-          <div className="space-y-3">
-            {inTransitOrders.map((order) => {
-              const dStatus = order.delivery?.status || 'out_for_delivery';
-              const isNear = dStatus === 'near_destination';
-              const partner = order.delivery?.delivery_partner;
-
-              return (
-                <div
-                  key={order.id}
-                  className={`bg-white border rounded-xl p-3.5 shadow-xs space-y-2.5 ${
-                    isNear ? 'border-amber-400 ring-1 ring-amber-400 bg-amber-50/20' : 'border-blue-200'
-                  }`}
-                >
-                  <div className="flex items-center justify-between">
-                    <Link
-                      to={`/orders/${order.id}`}
-                      className="font-mono-code font-bold text-xs text-slate-900 hover:text-blue-700"
-                    >
-                      {formatShortId(order.id)}
-                    </Link>
-                    <span
-                      className={`text-[10px] font-mono-code font-bold px-2 py-0.5 rounded-full uppercase ${
-                        isNear ? 'bg-amber-100 text-amber-900' : 'bg-blue-100 text-blue-800'
-                      }`}
-                    >
-                      {isNear ? 'Nearby Zone' : 'In Transit'}
-                    </span>
-                  </div>
-
-                  <div className="text-xs">
-                    <div className="font-semibold text-slate-900">{order.recipient_name}</div>
-                    <div className="text-[11px] text-slate-500 truncate">{order.address_line1}</div>
-                    {order.delivery?.estimated_delivery_at && (
-                      <div className="flex items-center gap-1 text-[11px] font-mono-code text-blue-700 mt-1">
-                        <Clock className="w-3 h-3 text-blue-500" />
-                        ETA: {formatTimeOnly(order.delivery.estimated_delivery_at)}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Stage Progress Actions */}
-                  <div className="pt-2 border-t border-slate-100 space-y-1.5">
-                    {!isNear ? (
-                      <button
-                        type="button"
-                        disabled={processingOrderId === order.id}
-                        onClick={() =>
-                          handleStatusProgression(order.id, 'near_destination', {
-                            locationName: order.city,
-                          })
-                        }
-                        className="w-full flex items-center justify-center gap-1 px-2.5 py-1 text-xs font-medium text-amber-900 bg-amber-50 hover:bg-amber-100 border border-amber-300 rounded-lg transition"
-                      >
-                        <MapPin className="w-3.5 h-3.5 text-amber-600" /> Trigger “Nearby” Alert
-                      </button>
-                    ) : (
-                      <div className="text-[11px] text-amber-800 bg-amber-100/60 px-2 py-0.5 rounded text-center font-medium">
-                        Customer notified rider is nearby
-                      </div>
-                    )}
-
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => setPodModalOrder(order)}
-                        className="flex-1 flex items-center justify-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-xs transition"
-                      >
-                        <ShieldCheck className="w-3.5 h-3.5" /> Mark Delivered
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setFailedModalOrder(order)}
-                        className="px-2 py-1.5 text-xs font-medium text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg transition"
-                        title="Report Delivery Issue"
-                      >
-                        Issue
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Column 4: Delivered / Completed (POD Verified) */}
-        <div className="bg-emerald-50/40 border border-emerald-200/80 rounded-2xl p-3.5 space-y-3 min-h-[500px]">
-          <div className="flex items-center justify-between pb-2 border-b border-emerald-200">
-            <div className="flex items-center gap-2">
-              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
-              <h3 className="font-semibold text-emerald-950 text-xs uppercase font-mono-code">
-                4. Delivered & POD
-              </h3>
-            </div>
-            <span className="px-2 py-0.5 bg-white text-emerald-800 rounded-full text-xs font-mono-code font-bold shadow-xs">
-              {deliveredOrders.length}
-            </span>
-          </div>
-
-          <div className="space-y-3">
-            {deliveredOrders.map((order) => {
-              const pod = order.delivery?.proof_of_delivery;
-              return (
-                <div
-                  key={order.id}
-                  className="bg-white border border-emerald-200 rounded-xl p-3.5 shadow-xs space-y-2"
-                >
-                  <div className="flex items-center justify-between">
-                    <Link
-                      to={`/orders/${order.id}`}
-                      className="font-mono-code font-bold text-xs text-slate-900 hover:text-emerald-700"
-                    >
-                      {formatShortId(order.id)}
-                    </Link>
-                    <span className="flex items-center gap-0.5 text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded">
-                      <CheckCircle2 className="w-3 h-3" /> Delivered
-                    </span>
-                  </div>
-
-                  <div className="text-xs">
-                    <div className="font-semibold text-slate-900">{order.recipient_name}</div>
-                    <div className="text-[11px] text-slate-500">
-                      Delivered at {formatTimeOnly(order.delivered_at || order.updated_at)}
-                    </div>
-                  </div>
-
-                  {pod && (
-                    <div className="p-2 bg-slate-50 rounded-lg border border-slate-200/70 text-[11px] space-y-0.5">
-                      <div className="font-medium text-slate-700">Received by: {pod.recipient_name}</div>
-                      <div className="text-slate-500 uppercase font-mono-code text-[10px]">
-                        Method: {pod.method} {pod.otp_code ? `(OTP: ${pod.otp_code})` : ''}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Column 5: Failed / Reschedule Queue */}
-        <div className="bg-rose-50/40 border border-rose-200/80 rounded-2xl p-3.5 space-y-3 min-h-[500px]">
-          <div className="flex items-center justify-between pb-2 border-b border-rose-200">
-            <div className="flex items-center gap-2">
-              <span className="w-2.5 h-2.5 rounded-full bg-rose-500" />
-              <h3 className="font-semibold text-rose-950 text-xs uppercase font-mono-code">
-                5. Failed / Reschedule
-              </h3>
-            </div>
-            <span className="px-2 py-0.5 bg-white text-rose-800 rounded-full text-xs font-mono-code font-bold shadow-xs">
-              {failedOrders.length}
-            </span>
-          </div>
-
-          <div className="space-y-3">
-            {failedOrders.map((order) => (
-              <div
-                key={order.id}
-                className="bg-white border border-rose-200 rounded-xl p-3.5 shadow-xs space-y-2"
+              <span
+                className={`px-2 py-0.5 rounded-full text-xs font-mono-code font-bold ${lane.badgeBg}`}
               >
-                <div className="flex items-center justify-between">
-                  <Link
-                    to={`/orders/${order.id}`}
-                    className="font-mono-code font-bold text-xs text-slate-900 hover:text-rose-700"
-                  >
-                    {formatShortId(order.id)}
-                  </Link>
-                  <span className="text-[10px] font-bold text-rose-700 bg-rose-50 px-1.5 py-0.5 rounded">
-                    Action Needed
-                  </span>
-                </div>
+                {lane.count}
+              </span>
+            </div>
 
-                <div className="p-2 bg-rose-50/60 border border-rose-100 rounded-lg text-xs space-y-0.5">
-                  <div className="font-semibold text-rose-950">
-                    {order.delivery?.failure_reason || 'Customer unavailable'}
-                  </div>
-                  <div className="text-[11px] text-rose-700">
-                    Next Step: {order.delivery?.failure_action || 'Reschedule'}
-                  </div>
+            {/* Order Cards Stack */}
+            <div className="space-y-3 flex-1">
+              {lane.orders.length > 0 ? (
+                lane.orders.map((order) => renderCard(order, lane.key))
+              ) : (
+                <div className="flex flex-col items-center justify-center text-center p-8 text-slate-400 h-48 border-2 border-dashed border-slate-200 rounded-xl bg-slate-50/50">
+                  <p className="text-xs text-slate-500 font-medium">{lane.emptyText}</p>
                 </div>
-
-                <div className="pt-2 border-t border-slate-100 flex items-center justify-end gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => setAssignModalOrder(order)}
-                    className="w-full flex items-center justify-center gap-1 px-2.5 py-1 text-xs font-semibold text-cyan-900 bg-cyan-50 hover:bg-cyan-100 border border-cyan-200 rounded-lg transition"
-                  >
-                    Reschedule / Reassign Rider
-                  </button>
-                </div>
-              </div>
-            ))}
+              )}
+            </div>
           </div>
-        </div>
+        ))}
       </div>
 
       {/* Modals */}
@@ -599,11 +554,6 @@ export const DispatchBoardPage: React.FC = () => {
           onSubmit={handleFailedSubmit}
         />
       )}
-
-      <SchemaMigrationModal
-        isOpen={isSchemaModalOpen}
-        onClose={() => setIsSchemaModalOpen(false)}
-      />
     </div>
   );
 };

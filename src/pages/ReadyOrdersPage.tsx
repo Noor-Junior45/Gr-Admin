@@ -141,25 +141,16 @@ export const ReadyOrdersPage: React.FC = () => {
       {/* Top Header Card */}
       <div
         id="ready-orders-header"
-        className="bg-white rounded-2xl border border-slate-200/90 p-4 sm:p-5 shadow-xs transition-all"
+        className="bg-white rounded-xl border border-slate-200/80 p-4 sm:p-5 shadow-xs transition-all"
       >
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wider bg-cyan-100 text-cyan-900 border border-cyan-300 flex items-center gap-1.5 font-mono-code">
-                <CheckCircle2 className="w-3.5 h-3.5 text-cyan-700" />
-                Stage 3 • Ready for Rider
-              </span>
-              <span className="text-xs text-slate-400 font-mono-code">
-                {orders.length} parcels packed & staged in store
-              </span>
-            </div>
-            <h1 className="text-xl sm:text-2xl font-serif-display font-bold text-slate-900">
-              Ready for Dispatch
+          <div className="flex items-center gap-3">
+            <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
+              Ready Orders
             </h1>
-            <p className="text-xs sm:text-sm text-slate-500">
-              Assign delivery riders to staged packages or dispatch for delivery.
-            </p>
+            <span className="px-2.5 py-0.5 rounded-md text-xs font-semibold bg-cyan-50 text-cyan-800 border border-cyan-200">
+              {orders.length} ready for dispatch
+            </span>
           </div>
 
           <div className="flex items-center gap-2.5 flex-wrap self-start md:self-center">
@@ -168,10 +159,10 @@ export const ReadyOrdersPage: React.FC = () => {
               type="button"
               onClick={() => loadReadyOrders(true)}
               disabled={refreshing || loading}
-              className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl transition cursor-pointer"
+              className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg transition cursor-pointer"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} />
-              <span>Refresh Staged</span>
+              <span>Refresh</span>
             </button>
           </div>
         </div>

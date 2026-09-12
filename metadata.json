@@ -1,5 +1,5 @@
 {
-  "name": "Giriraj Admin",
+  "name": "Smartrun",
   "description": "Internal order management tool for warehouse and packing staff.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]

@@ -21,7 +21,6 @@ import {
   saveDeliveryPartner,
   togglePartnerActiveStatus,
   deleteDeliveryPartner,
-  clearAllDeliveryPartners,
 } from '../services/deliveryService';
 
 export const DeliveryPartnersPage: React.FC = () => {
@@ -131,18 +130,6 @@ export const DeliveryPartnersPage: React.FC = () => {
     }
   };
 
-  const handleClearAllFleet = async () => {
-    if (!window.confirm('Are you sure you want to remove all delivery partners from the fleet?')) {
-      return;
-    }
-    try {
-      await clearAllDeliveryPartners();
-      setPartners([]);
-    } catch (err: any) {
-      alert(err.message || 'Failed to clear delivery partners');
-    }
-  };
-
   const filteredPartners = partners.filter((p) => {
     if (!searchQuery.trim()) return true;
     const q = searchQuery.toLowerCase();
@@ -159,35 +146,21 @@ export const DeliveryPartnersPage: React.FC = () => {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
-            <h1 className="font-serif-display font-bold text-slate-900 text-2xl tracking-tight">
-              Delivery Partner Fleet Profiles
+            <h1 className="font-bold text-slate-900 text-2xl tracking-tight">
+              Delivery Fleet
             </h1>
-            <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+            <span className="px-2.5 py-0.5 rounded-md text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
               {partners.filter((p) => p.is_active).length} Active Riders
             </span>
           </div>
-          <p className="text-sm text-slate-500 mt-1">
-            Manage dispatch fleet personnel, contact details, vehicle registration, and activity status.
-          </p>
         </div>
 
         <div className="flex items-center gap-2.5">
-          {partners.length > 0 && (
-            <button
-              type="button"
-              onClick={handleClearAllFleet}
-              className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-rose-700 bg-rose-50 border border-rose-200 rounded-lg hover:bg-rose-100 shadow-xs transition"
-              title="Remove all riders from fleet"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              Clear Fleet
-            </button>
-          )}
           <button
             type="button"
             onClick={loadData}
             disabled={isLoading}
-            className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 shadow-xs transition"
+            className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-200/80 rounded-lg hover:bg-slate-50 shadow-2xs transition cursor-pointer"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
             Refresh
@@ -195,7 +168,7 @@ export const DeliveryPartnersPage: React.FC = () => {
           <button
             type="button"
             onClick={handleOpenAdd}
-            className="flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-lg shadow-xs transition"
+            className="flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-lg shadow-2xs transition cursor-pointer"
           >
             <Plus className="w-4 h-4" /> Add Delivery Partner
           </button>

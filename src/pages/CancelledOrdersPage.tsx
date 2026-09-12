@@ -111,25 +111,16 @@ export const CancelledOrdersPage: React.FC = () => {
       {/* Top Header Card */}
       <div
         id="cancelled-orders-header"
-        className="bg-white rounded-2xl border border-slate-200/90 p-4 sm:p-5 shadow-xs transition-all"
+        className="bg-white rounded-xl border border-slate-200/80 p-4 sm:p-5 shadow-xs transition-all"
       >
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wider bg-rose-100 text-rose-900 border border-rose-300 flex items-center gap-1.5 font-mono-code">
-                <XCircle className="w-3.5 h-3.5 text-rose-700" />
-                Exceptions & Cancellations
-              </span>
-              <span className="text-xs text-slate-400 font-mono-code">
-                {orders.length} voided orders
-              </span>
-            </div>
-            <h1 className="text-xl sm:text-2xl font-serif-display font-bold text-slate-900">
+          <div className="flex items-center gap-3">
+            <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
               Cancelled Orders
             </h1>
-            <p className="text-xs sm:text-sm text-slate-500">
-              Archive of cancelled and voided orders with reason records and inventory restock logs.
-            </p>
+            <span className="px-2.5 py-0.5 rounded-md text-xs font-semibold bg-rose-50 text-rose-800 border border-rose-200">
+              {orders.length} cancelled
+            </span>
           </div>
 
           <div className="flex items-center gap-2.5 flex-wrap self-start md:self-center">
@@ -138,7 +129,7 @@ export const CancelledOrdersPage: React.FC = () => {
               type="button"
               onClick={() => loadCancelledOrders(true)}
               disabled={refreshing || loading}
-              className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl transition cursor-pointer"
+              className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg transition cursor-pointer"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} />
               <span>Refresh</span>

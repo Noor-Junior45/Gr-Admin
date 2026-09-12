@@ -56,8 +56,6 @@ import {
   Check,
   ExternalLink,
   Info,
-  Database,
-  Code2,
   UserPlus,
   ShieldCheck,
   AlertTriangle,
@@ -100,7 +98,6 @@ export const OrderDetailPage: React.FC = () => {
   const [showDeleteModal, setShowDeleteModal] = useState<boolean>(false);
   const [deleting, setDeleting] = useState<boolean>(false);
   const [deleteModalError, setDeleteModalError] = useState<string | null>(null);
-  const [showMigrationModal, setShowMigrationModal] = useState<boolean>(false);
   const [showAssignModal, setShowAssignModal] = useState<boolean>(false);
   const [showPodModal, setShowPodModal] = useState<boolean>(false);
   const [showFailedModal, setShowFailedModal] = useState<boolean>(false);
@@ -813,26 +810,34 @@ export const OrderDetailPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Internal Notes / Proposed Schema Card */}
-          <div className="bg-white rounded-xl border border-slate-200 p-4 sm:p-5 shadow-xs space-y-3">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-              <h2 className="text-xs font-bold uppercase font-mono-code text-slate-700 tracking-wider flex items-center gap-1.5">
+          {/* Customer Delivery Notes (if any) */}
+          {(order.delivery_notes || order.gate_instructions || order.landmark) && (
+            <div className="bg-white rounded-xl border border-slate-200/80 p-4 sm:p-5 shadow-xs space-y-2">
+              <div className="flex items-center gap-1.5 border-b border-slate-100 pb-2">
                 <FileText className="w-3.5 h-3.5 text-slate-500" />
-                <span>Internal Admin Notes</span>
-              </h2>
+                <h2 className="text-xs font-bold uppercase tracking-wider text-slate-700">
+                  Customer Delivery Instructions
+                </h2>
+              </div>
+              {order.delivery_notes && (
+                <p className="text-xs text-slate-700 leading-relaxed bg-slate-50 p-2.5 rounded-lg border border-slate-100">
+                  {order.delivery_notes}
+                </p>
+              )}
+              {order.gate_instructions && (
+                <p className="text-xs text-slate-600">
+                  <span className="font-semibold text-slate-700">Gate / Entry: </span>
+                  {order.gate_instructions}
+                </p>
+              )}
+              {order.landmark && (
+                <p className="text-xs text-slate-600">
+                  <span className="font-semibold text-slate-700">Landmark: </span>
+                  {order.landmark}
+                </p>
+              )}
             </div>
-            <p className="text-xs text-slate-500 leading-relaxed">
-              Database schema does not currently include an <code className="font-mono-code bg-slate-100 px-1 py-0.5 rounded text-[11px]">admin_notes</code> column on <code className="font-mono-code bg-slate-100 px-1 py-0.5 rounded text-[11px]">orders</code>.
-            </p>
-            <button
-              type="button"
-              onClick={() => setShowMigrationModal(true)}
-              className="inline-flex items-center gap-1 text-xs text-amber-700 hover:text-amber-800 font-semibold cursor-pointer"
-            >
-              <Code2 className="w-3.5 h-3.5" />
-              <span>View proposed migration SQL</span>
-            </button>
-          </div>
+          )}
         </div>
 
         {/* Right Column (2/3): Items Packing Workspace & Customer Live Timeline */}
@@ -1240,51 +1245,6 @@ export const OrderDetailPage: React.FC = () => {
               >
                 {deleting && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
                 <span>{deleting ? 'Deleting Order...' : 'Delete Order Permanently'}</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Migration Proposal SQL Modal */}
-      {showMigrationModal && (
-        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl border border-slate-200 max-w-xl w-full p-5 sm:p-6 shadow-xl space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <div className="flex items-center gap-2 text-amber-600">
-                <Database className="w-5 h-5 text-amber-500" />
-                <h3 className="text-base font-bold text-slate-900">
-                  Proposed Schema Extension (Optional)
-                </h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowMigrationModal(false)}
-                className="text-slate-400 hover:text-slate-700 p-1 cursor-pointer"
-              >
-                ✕
-              </button>
-            </div>
-
-            <p className="text-xs text-slate-600 leading-relaxed">
-              In accordance with security guidelines, this application enforces verified existing schema without running unrequested DDL commands. To persist internal warehouse comments and cancellation reasons in Supabase, the following optional migration can be executed in your Supabase SQL Editor:
-            </p>
-
-            <div className="bg-slate-900 text-slate-100 p-3.5 rounded-xl font-mono-code text-xs overflow-x-auto">
-              <pre className="text-amber-300">-- 1. Add admin notes and cancellation reason to orders table</pre>
-              <pre className="text-slate-200 mt-1">ALTER TABLE public.orders</pre>
-              <pre className="text-emerald-400">  ADD COLUMN IF NOT EXISTS admin_notes text,</pre>
-              <pre className="text-emerald-400">  ADD COLUMN IF NOT EXISTS cancellation_reason text,</pre>
-              <pre className="text-emerald-400">  ADD COLUMN IF NOT EXISTS cancelled_at timestamptz;</pre>
-            </div>
-
-            <div className="pt-2 flex justify-end">
-              <button
-                type="button"
-                onClick={() => setShowMigrationModal(false)}
-                className="px-4 py-2 bg-slate-900 text-white text-xs font-semibold rounded-lg hover:bg-slate-800 transition cursor-pointer"
-              >
-                Dismiss
               </button>
             </div>
           </div>

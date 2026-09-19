@@ -172,6 +172,7 @@ export interface AuthState {
 
 export interface OrderFilters {
   status: 'all' | OrderStatus;
+  statusIn?: OrderStatus[];
   paymentStatus: 'all' | 'paid' | 'pending' | 'cod' | 'failed';
   paymentMethod: 'all' | 'cod' | 'upi' | 'online' | 'card';
   dateRange: 'all' | 'today' | 'last7' | 'last30' | 'custom';

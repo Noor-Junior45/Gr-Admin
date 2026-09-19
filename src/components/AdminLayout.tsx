@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Sidebar } from './Sidebar';
 import { Header } from './Header';
+import { BottomNavBar } from './BottomNavBar';
 import { NewOrderAlertBanner } from './NewOrderAlertBanner';
 import { NotificationSettingsModal } from './NotificationSettingsModal';
 
@@ -11,7 +12,7 @@ interface AdminLayoutProps {
 export const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     try {
-      return localStorage.getItem('giriraj_sidebar_collapsed') === 'true';
+      return localStorage.getItem('smartrun_sidebar_collapsed') === 'true';
     } catch {
       return false;
     }
@@ -22,7 +23,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
     setSidebarCollapsed((prev) => {
       const next = !prev;
       try {
-        localStorage.setItem('giriraj_sidebar_collapsed', String(next));
+        localStorage.setItem('smartrun_sidebar_collapsed', String(next));
       } catch (e) {
         console.warn(e);
       }
@@ -51,8 +52,14 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
         }`}
       >
         <Header onOpenMobileNav={() => setMobileNavOpen(true)} />
-        <main className="flex-1 p-3 sm:p-6 max-w-7xl w-full mx-auto">{children}</main>
+        <main className="flex-1 p-3 sm:p-6 pb-24 lg:pb-6 max-w-7xl w-full mx-auto">
+          {children}
+        </main>
       </div>
+
+      {/* Mobile App Bottom Navigation Bar (Phone & Tablet) */}
+      <BottomNavBar />
     </div>
   );
 };
+

@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabaseClient';
 import { fetchOrderStatusCounts, OrderStatusCounts } from '../services/orderService';
 import {
@@ -9,17 +8,14 @@ import {
   Clock,
   Box,
   CheckCircle2,
+  Bike,
   Truck,
   Sparkles,
   XCircle,
-  Users,
-  Layers,
-  LogOut,
   ShieldCheck,
   ChevronLeft,
   ChevronRight,
   Store,
-  Navigation,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -35,7 +31,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
   mobileOpen,
   onCloseMobile,
 }) => {
-  const { email, logout } = useAuth();
   const location = useLocation();
 
   const [statusCounts, setStatusCounts] = useState<OrderStatusCounts>({
@@ -80,10 +75,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
       clearInterval(interval);
     };
   }, [loadCounts]);
-
-  const handleLogout = async () => {
-    await logout();
-  };
 
   // Determine active state for order stage routes
   const isStageActive = (targetStatus?: string) => {
@@ -198,65 +189,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
               />
               {!collapsed && <span className="truncate">Overview</span>}
             </NavLink>
-
-            {/* Dispatch Board */}
-            <NavLink
-              to="/dispatch"
-              onClick={onCloseMobile}
-              className={({ isActive }) =>
-                `flex items-center justify-between px-3 py-2 rounded-xl text-xs sm:text-sm font-medium transition cursor-pointer group ${
-                  isActive
-                    ? 'bg-slate-900 text-white font-semibold shadow-xs'
-                    : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
-                }`
-              }
-              title={collapsed ? 'Dispatch Board' : undefined}
-            >
-              <div className="flex items-center gap-3 min-w-0">
-                <Navigation
-                  className={`w-4 h-4 shrink-0 transition ${
-                    location.pathname.startsWith('/dispatch')
-                      ? 'text-amber-400'
-                      : 'text-slate-400 group-hover:text-slate-600'
-                  }`}
-                />
-                {!collapsed && <span className="truncate">Dispatch Board</span>}
-              </div>
-              {!collapsed && (statusCounts.packed > 0 || statusCounts.shipped > 0) && (
-                <span
-                  className={`text-[11px] font-mono font-semibold px-2 py-0.5 rounded-md ${
-                    location.pathname.startsWith('/dispatch')
-                      ? 'bg-slate-800 text-amber-400'
-                      : 'bg-slate-100 text-slate-700'
-                  }`}
-                >
-                  {statusCounts.packed + statusCounts.shipped}
-                </span>
-              )}
-            </NavLink>
-
-            {/* Delivery Fleet / Riders */}
-            <NavLink
-              to="/delivery-partners"
-              onClick={onCloseMobile}
-              className={({ isActive }) =>
-                `flex items-center gap-3 px-3 py-2 rounded-xl text-xs sm:text-sm font-medium transition cursor-pointer group ${
-                  isActive
-                    ? 'bg-slate-900 text-white font-semibold shadow-xs'
-                    : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
-                }`
-              }
-              title={collapsed ? 'Delivery Fleet' : undefined}
-            >
-              <Users
-                className={`w-4 h-4 shrink-0 transition ${
-                  location.pathname.startsWith('/delivery-partners')
-                    ? 'text-amber-400'
-                    : 'text-slate-400 group-hover:text-slate-600'
-                }`}
-              />
-              {!collapsed && <span className="truncate">Delivery Fleet</span>}
-            </NavLink>
           </div>
 
           {/* Orders Pipeline */}
@@ -264,67 +196,39 @@ export const Sidebar: React.FC<SidebarProps> = ({
             {!collapsed && (
               <div className="flex items-center justify-between px-3 mb-1">
                 <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-                  Orders
+                  Orders Pipeline
                 </span>
                 <span className="text-[11px] font-mono text-slate-500 font-medium">
-                  {statusCounts.all}
+                  {statusCounts.pending}
                 </span>
               </div>
             )}
 
-            {/* All Orders */}
+            {/* Merged Pending Orders */}
             <NavLink
               to="/orders"
               onClick={onCloseMobile}
               className={`flex items-center justify-between px-3 py-2 rounded-xl text-xs sm:text-sm font-medium transition cursor-pointer group ${
-                isStageActive('all')
+                isStageActive('all') || isStageActive('pending') || location.pathname === '/orders' || location.pathname === '/pending'
                   ? 'bg-slate-900 text-white font-semibold shadow-xs'
                   : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
               }`}
-              title={collapsed ? `All Orders (${statusCounts.all})` : undefined}
-            >
-              <div className="flex items-center gap-3 min-w-0">
-                <Package
-                  className={`w-4 h-4 shrink-0 ${
-                    isStageActive('all') ? 'text-amber-400' : 'text-slate-400'
-                  }`}
-                />
-                {!collapsed && <span className="truncate">All Orders</span>}
-              </div>
-              {!collapsed && (
-                <span
-                  className={`text-[11px] font-mono px-2 py-0.5 rounded-md font-semibold ${
-                    isStageActive('all') ? 'bg-slate-800 text-slate-200' : 'bg-slate-100 text-slate-600'
-                  }`}
-                >
-                  {statusCounts.all}
-                </span>
-              )}
-            </NavLink>
-
-            {/* Pending */}
-            <NavLink
-              to="/pending"
-              onClick={onCloseMobile}
-              className={`flex items-center justify-between px-3 py-2 rounded-xl text-xs sm:text-sm font-medium transition cursor-pointer group ${
-                isStageActive('pending')
-                  ? 'bg-slate-900 text-white font-semibold shadow-xs'
-                  : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
-              }`}
-              title={collapsed ? `Pending (${statusCounts.pending})` : undefined}
+              title={collapsed ? `Order (${statusCounts.pending})` : undefined}
             >
               <div className="flex items-center gap-3 min-w-0">
                 <Clock
                   className={`w-4 h-4 shrink-0 ${
-                    isStageActive('pending') ? 'text-amber-400' : 'text-amber-500'
+                    isStageActive('all') || isStageActive('pending') || location.pathname === '/orders' || location.pathname === '/pending'
+                      ? 'text-amber-400'
+                      : 'text-amber-500'
                   }`}
                 />
-                {!collapsed && <span className="truncate">Pending</span>}
+                {!collapsed && <span className="truncate">Order</span>}
               </div>
-              {!collapsed && statusCounts.pending > 0 && (
+              {!collapsed && (
                 <span
                   className={`text-[11px] font-mono px-2 py-0.5 rounded-md font-bold ${
-                    isStageActive('pending')
+                    isStageActive('all') || isStageActive('pending') || location.pathname === '/orders' || location.pathname === '/pending'
                       ? 'bg-slate-800 text-amber-400'
                       : 'bg-amber-100 text-amber-800'
                   }`}
@@ -366,7 +270,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               )}
             </NavLink>
 
-            {/* Ready for Rider */}
+            {/* Rider */}
             <NavLink
               to="/ready"
               onClick={onCloseMobile}
@@ -375,15 +279,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   ? 'bg-slate-900 text-white font-semibold shadow-xs'
                   : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
               }`}
-              title={collapsed ? `Ready for Rider (${statusCounts.packed})` : undefined}
+              title={collapsed ? `Rider (${statusCounts.packed})` : undefined}
             >
               <div className="flex items-center gap-3 min-w-0">
-                <CheckCircle2
+                <Bike
                   className={`w-4 h-4 shrink-0 ${
                     isStageActive('packed') ? 'text-teal-300' : 'text-teal-600'
                   }`}
                 />
-                {!collapsed && <span className="truncate">Ready for Rider</span>}
+                {!collapsed && <span className="truncate">Rider</span>}
               </div>
               {!collapsed && statusCounts.packed > 0 && (
                 <span
@@ -494,57 +398,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
               )}
             </NavLink>
           </div>
-
-          {/* Catalog */}
-          <div className="pt-2 border-t border-slate-100 space-y-1">
-            {!collapsed && (
-              <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 px-3 mb-1">
-                Catalog
-              </div>
-            )}
-
-            <NavLink
-              to="/products"
-              onClick={onCloseMobile}
-              className={({ isActive }) =>
-                `flex items-center gap-3 px-3 py-2 rounded-xl text-xs sm:text-sm font-medium transition cursor-pointer group ${
-                  isActive
-                    ? 'bg-slate-900 text-white font-semibold shadow-xs'
-                    : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
-                }`
-              }
-              title={collapsed ? 'Products & Stock' : undefined}
-            >
-              <Layers
-                className={`w-4 h-4 shrink-0 transition ${
-                  location.pathname.startsWith('/products')
-                    ? 'text-amber-400'
-                    : 'text-slate-400 group-hover:text-slate-600'
-                }`}
-              />
-              {!collapsed && <span className="truncate">Products & Stock</span>}
-            </NavLink>
-          </div>
-        </div>
-
-        {/* User Footer */}
-        <div className="p-3 border-t border-slate-200/80 space-y-2 bg-slate-50/50 shrink-0">
-          {email && !collapsed && (
-            <div className="flex items-center gap-2 px-2.5 py-1.5 bg-white border border-slate-200/80 rounded-lg text-slate-700 text-xs shadow-2xs">
-              <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-              <span className="font-mono text-[11px] truncate">{email}</span>
-            </div>
-          )}
-
-          <button
-            type="button"
-            onClick={handleLogout}
-            className="w-full flex items-center justify-center gap-2 px-3 py-2 text-xs font-semibold text-slate-700 hover:text-rose-700 bg-white hover:bg-rose-50 border border-slate-200/80 hover:border-rose-200 rounded-xl shadow-2xs transition cursor-pointer"
-            title="Sign out of warehouse portal"
-          >
-            <LogOut className="w-3.5 h-3.5" />
-            {!collapsed && <span>Sign Out</span>}
-          </button>
         </div>
       </aside>
     </>

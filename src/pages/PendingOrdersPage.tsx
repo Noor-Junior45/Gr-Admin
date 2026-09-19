@@ -129,67 +129,49 @@ export const PendingOrdersPage: React.FC = () => {
   });
 
   return (
-    <div className="space-y-5">
-      {/* Top Header Card */}
-      <div
-        id="pending-orders-header"
-        className="bg-white rounded-xl border border-slate-200/80 p-4 sm:p-5 shadow-xs transition-all"
-      >
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
-              Pending Orders
-            </h1>
-            <span className="px-2.5 py-0.5 rounded-md text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-200">
-              {orders.length} to review
-            </span>
-          </div>
-
-          {/* Action Toolbar */}
-          <div className="flex items-center gap-2.5 flex-wrap self-start md:self-center">
-            {orders.length > 0 && (
-              <button
-                id="btn-accept-all-pending"
-                type="button"
-                onClick={handleAcceptAll}
-                disabled={bulkProcessing || loading}
-                className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white font-semibold text-xs rounded-lg shadow-2xs transition cursor-pointer disabled:opacity-50"
-              >
-                <Box className="w-3.5 h-3.5" />
-                <span>{bulkProcessing ? 'Accepting All...' : `Accept All (${orders.length})`}</span>
-              </button>
-            )}
-
-            <button
-              id="btn-refresh-pending"
-              type="button"
-              onClick={() => loadPendingOrders(true)}
-              disabled={refreshing || loading}
-              className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg transition cursor-pointer"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} />
-              <span>Refresh</span>
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Filter / Search Bar */}
-      <div className="bg-white rounded-xl border border-slate-200 p-3 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-3">
-        <div className="relative w-full sm:w-80">
+    <div className="space-y-4">
+      {/* Streamlined Search & Action Toolbar */}
+      <div className="bg-white rounded-xl border border-slate-200 p-2.5 sm:p-3 shadow-2xs flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
+        <div className="relative flex-1">
           <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
           <input
             id="input-search-pending"
             type="text"
-            placeholder="Search by customer, phone, PIN or ID..."
+            placeholder="Search pending orders by customer, phone, ID..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500 focus:bg-white transition"
+            className="w-full pl-9 pr-3 py-2 text-xs sm:text-sm bg-slate-50 border border-slate-200 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 focus:bg-white transition"
           />
         </div>
 
-        <div className="text-xs text-slate-500 font-mono-code self-end sm:self-center">
-          Showing {filteredOrders.length} of {orders.length} pending
+        <div className="flex items-center justify-between sm:justify-end gap-2 shrink-0">
+          <span className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-200">
+            {orders.length} to review
+          </span>
+
+          {orders.length > 0 && (
+            <button
+              id="btn-accept-all-pending"
+              type="button"
+              onClick={handleAcceptAll}
+              disabled={bulkProcessing || loading}
+              className="flex items-center gap-1.5 px-3 py-2 bg-slate-900 hover:bg-slate-800 text-white font-semibold text-xs rounded-lg shadow-2xs transition active:scale-95 cursor-pointer disabled:opacity-50"
+            >
+              <Box className="w-3.5 h-3.5" />
+              <span>{bulkProcessing ? 'Accepting...' : `Accept All`}</span>
+            </button>
+          )}
+
+          <button
+            id="btn-refresh-pending"
+            type="button"
+            onClick={() => loadPendingOrders(true)}
+            disabled={refreshing || loading}
+            className="flex items-center justify-center p-2 text-xs font-semibold text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg transition active:scale-95 cursor-pointer"
+            title="Refresh"
+          >
+            <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin text-amber-600' : ''}`} />
+          </button>
         </div>
       </div>
 
@@ -224,15 +206,15 @@ export const PendingOrdersPage: React.FC = () => {
               <div
                 key={order.id}
                 id={`pending-card-${order.id}`}
-                className={`bg-white rounded-2xl border transition-all duration-150 p-4 flex flex-col justify-between shadow-xs hover:shadow-sm ${
-                  isUrgent ? 'border-amber-400 ring-1 ring-amber-300' : 'border-slate-200 hover:border-slate-300'
+                className={`bg-white rounded-xl border transition-all duration-150 p-3 sm:p-3.5 flex flex-col justify-between shadow-2xs hover:shadow-xs ${
+                  isUrgent ? 'border-amber-400 ring-1 ring-amber-300/70' : 'border-slate-200 hover:border-slate-300'
                 }`}
               >
                 {/* Card Header */}
-                <div className="space-y-3">
-                  <div className="flex items-start justify-between gap-2 pb-2.5 border-b border-slate-100">
-                    <div>
-                      <div className="flex items-center gap-2">
+                <div className="space-y-2.5">
+                  <div className="flex items-start justify-between gap-2 pb-2 border-b border-slate-100">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5 flex-wrap">
                         <Link
                           to={`/orders/${order.id}`}
                           className="font-mono-code font-bold text-xs text-slate-900 hover:text-amber-600 transition"
@@ -245,13 +227,23 @@ export const PendingOrdersPage: React.FC = () => {
                           </span>
                         )}
                       </div>
-                      <span className="text-[11px] text-slate-500 font-mono-code flex items-center gap-1 mt-0.5">
-                        <Clock className="w-3 h-3 text-amber-500" />
-                        {order.placed_at ? formatTimeElapsed(order.placed_at) : 'Just now'}
-                      </span>
+                      
+                      {/* Date & Time beside Just Now / Elapsed Time */}
+                      <div className="flex items-center gap-1.5 flex-wrap text-[10.5px] text-slate-500 font-mono-code mt-0.5">
+                        <span className="flex items-center gap-1 font-medium text-amber-700">
+                          <Clock className="w-3 h-3 text-amber-500 shrink-0" />
+                          {order.placed_at ? formatTimeElapsed(order.placed_at) : 'Just now'}
+                        </span>
+                        {order.placed_at && (
+                          <>
+                            <span className="text-slate-300">•</span>
+                            <span className="text-slate-600">{formatDateTime(order.placed_at)}</span>
+                          </>
+                        )}
+                      </div>
                     </div>
 
-                    <div className="text-right">
+                    <div className="text-right shrink-0">
                       <div className="text-sm font-bold text-slate-900">
                         {formatCurrency(order.total_amount)}
                       </div>
@@ -284,7 +276,7 @@ export const PendingOrdersPage: React.FC = () => {
                   </div>
 
                   {/* Order Items Preview */}
-                  <div className="bg-slate-50 rounded-xl p-2.5 space-y-1.5 border border-slate-100">
+                  <div className="bg-slate-50 rounded-lg p-2 space-y-1 border border-slate-100">
                     <div className="flex items-center justify-between text-[11px] font-semibold text-slate-700">
                       <span className="flex items-center gap-1">
                         <ShoppingBag className="w-3 h-3 text-slate-400" />
@@ -292,7 +284,7 @@ export const PendingOrdersPage: React.FC = () => {
                       </span>
                     </div>
 
-                    <div className="space-y-1 max-h-24 overflow-y-auto custom-scrollbar pr-1">
+                    <div className="space-y-1 max-h-20 overflow-y-auto custom-scrollbar pr-1">
                       {items.length > 0 ? (
                         items.map((it) => (
                           <div key={it.id} className="flex items-center justify-between text-xs text-slate-600">
@@ -311,35 +303,23 @@ export const PendingOrdersPage: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Card Action Buttons */}
-                <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
+                {/* Center Long Red Liquid Apple Glassmorphism Pending Button */}
+                <div className="mt-2.5 pt-2.5 border-t border-slate-100 flex items-center justify-center w-full">
                   <Link
                     to={`/orders/${order.id}`}
-                    className="px-3 py-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-lg transition"
+                    id={`btn-pending-action-${order.id}`}
+                    className="w-full sm:w-[94%] relative overflow-hidden flex items-center justify-center gap-2 py-2.5 px-6 rounded-2xl font-bold text-xs sm:text-sm text-white tracking-wider uppercase shadow-[0_8px_20px_-3px_rgba(239,68,68,0.45),inset_0_1px_1.5px_0_rgba(255,255,255,0.55),inset_0_-2px_4px_0_rgba(0,0,0,0.2)] bg-gradient-to-r from-red-600 via-rose-600 to-red-600 backdrop-blur-xl border border-white/35 cursor-pointer select-none"
+                    title="View pending order details"
                   >
-                    Details
+                    {/* Liquid Apple Glass Surface Sheen & Specular Reflection */}
+                    <div className="absolute inset-x-0 top-0 h-[48%] bg-gradient-to-b from-white/35 via-white/10 to-transparent pointer-events-none rounded-t-2xl" />
+
+                    {/* Button Content */}
+                    <span className="relative z-10 flex items-center justify-center gap-2 drop-shadow-xs">
+                      <span className="w-2 h-2 rounded-full bg-white shadow-[0_0_8px_rgba(255,255,255,0.95)] animate-pulse" />
+                      <span>Pending</span>
+                    </span>
                   </Link>
-
-                  <button
-                    type="button"
-                    onClick={() => handleDeleteOrder(order.id)}
-                    disabled={isProcessing}
-                    title="Delete order permanently"
-                    className="p-2 text-rose-500 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 rounded-lg transition cursor-pointer disabled:opacity-50"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => handleAcceptAndPack(order.id)}
-                    disabled={isProcessing}
-                    className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-xl shadow-xs transition cursor-pointer disabled:opacity-50 active:scale-98"
-                  >
-                    <Box className="w-3.5 h-3.5" />
-                    <span>{isProcessing ? 'Accepting...' : 'Accept & Start Packing'}</span>
-                    <ArrowRight className="w-3.5 h-3.5 opacity-70" />
-                  </button>
                 </div>
               </div>
             );

@@ -1,12 +1,12 @@
 {
-  "name": "Giriraj Admin - Warehouse Portal",
-  "short_name": "Giriraj Admin",
-  "description": "Internal order management and packing system for Giriraj warehouse staff.",
+  "name": "Smartrun",
+  "short_name": "Smartrun",
+  "description": "Smartrun warehouse operations, order fulfillment, and dispatch management mobile app.",
   "start_url": "/",
   "id": "/",
   "display": "standalone",
-  "background_color": "#fdfdfc",
-  "theme_color": "#1a1a18",
+  "background_color": "#ffffff",
+  "theme_color": "#0f172a",
   "orientation": "portrait-primary",
   "icons": [
     {

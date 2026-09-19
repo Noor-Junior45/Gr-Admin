@@ -1,197 +1,89 @@
-import React, { useEffect, useState, useMemo, useCallback } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
-import { Order, OrderStatus, OrderFilters } from '../types';
-import { fetchOrdersList, exportOrdersToCSV, deleteOrder } from '../services/orderService';
-import { useNotifications } from '../context/NotificationContext';
-import { StatusTimelineSelector } from '../components/StatusTimelineSelector';
+import { Order, OrderStatus } from '../types';
+import { fetchOrdersList } from '../services/orderService';
 import {
   formatCurrency,
   formatDateTime,
+  formatTimeElapsed,
   formatShortId,
-  getStatusConfig,
-  getPaymentBadge,
-  getRefundBadge,
 } from '../utils/formatters';
 import {
-  Search,
+  Clock,
   RefreshCw,
   Phone,
-  Package,
-  ChevronRight,
-  Filter,
-  AlertCircle,
-  Clock,
+  MapPin,
   CheckCircle2,
-  Truck,
-  Box,
-  XCircle,
-  Inbox,
-  Sparkles,
-  Download,
-  X,
-  Calendar,
-  CreditCard,
-  ArrowUpDown,
-  ChevronLeft,
-  ChevronsLeft,
-  ChevronsRight,
-  Check,
-  Layers,
-  Radio,
-  Trash2,
+  AlertCircle,
   Loader2,
+  ShoppingBag,
+  User,
 } from 'lucide-react';
+
+const PENDING_ONLY_STATUSES: OrderStatus[] = ['pending'];
+const PAGE_SIZE = 30;
 
 export const OrdersListPage: React.FC = () => {
   const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
-  const { newOrderCountSinceOpen, resetNewOrderCount } = useNotifications();
-
-  // Parse filters from URL query parameters
-  const initialStatus = (searchParams.get('status') as 'all' | OrderStatus) || 'all';
-  const initialPaymentStatus = (searchParams.get('paymentStatus') as any) || 'all';
-  const initialPaymentMethod = (searchParams.get('paymentMethod') as any) || 'all';
-  const initialDateRange = (searchParams.get('dateRange') as any) || 'all';
-
-  const [statusTab, setStatusTab] = useState<'all' | OrderStatus>(initialStatus);
-  const [paymentStatusFilter, setPaymentStatusFilter] = useState<string>(initialPaymentStatus);
-  const [paymentMethodFilter, setPaymentMethodFilter] = useState<string>(initialPaymentMethod);
-  const [dateRangeFilter, setDateRangeFilter] = useState<string>(initialDateRange);
-  const [customStartDate, setCustomStartDate] = useState<string>('');
-  const [customEndDate, setCustomEndDate] = useState<string>('');
-  const [searchQuery, setSearchQuery] = useState<string>(searchParams.get('q') || '');
-  const [sortBy, setSortBy] = useState<
-    'placed_at_desc' | 'placed_at_asc' | 'total_desc' | 'total_asc' | 'status'
-  >('placed_at_desc');
-  const [page, setPage] = useState<number>(1);
-  const [pageSize, setPageSize] = useState<number>(15);
-
   const [orders, setOrders] = useState<Order[]>([]);
   const [totalCount, setTotalCount] = useState<number>(0);
-  const [statusCounts, setStatusCounts] = useState<{
-    all: number;
-    pending: number;
-    packing: number;
-    packed: number;
-    shipped: number;
-    delivered: number;
-    cancelled: number;
-  }>({
-    all: 0,
-    pending: 0,
-    packing: 0,
-    packed: 0,
-    shipped: 0,
-    delivered: 0,
-    cancelled: 0,
-  });
   const [loading, setLoading] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
-  const [deletingOrderId, setDeletingOrderId] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState<boolean>(false);
+  const [hasMore, setHasMore] = useState<boolean>(true);
+  const [page, setPage] = useState<number>(1);
   const [error, setError] = useState<string | null>(null);
-  const [showFiltersDrawer, setShowFiltersDrawer] = useState<boolean>(false);
 
-  const loadStatusCounts = useCallback(async () => {
+  const observerRef = useRef<HTMLDivElement | null>(null);
+
+  // Initial load of strictly pending orders
+  const loadInitialOrders = useCallback(async (isRefresh = false) => {
+    if (isRefresh) setRefreshing(true);
+    else setLoading(true);
+    setError(null);
+
     try {
-      const { data } = await supabase.from('orders').select('status');
-      if (data) {
-        const counts = {
-          all: data.length,
-          pending: 0,
-          packing: 0,
-          packed: 0,
-          shipped: 0,
-          delivered: 0,
-          cancelled: 0,
-        };
-        data.forEach((row: any) => {
-          const st = (row.status || '').toLowerCase();
-          if (st === 'pending' || st === 'confirmed') counts.pending++;
-          else if (st === 'packing') counts.packing++;
-          else if (st === 'packed') counts.packed++;
-          else if (st === 'shipped') counts.shipped++;
-          else if (st === 'delivered') counts.delivered++;
-          else if (st === 'cancelled') counts.cancelled++;
-        });
-        setStatusCounts(counts);
-      }
-    } catch (err) {
-      console.warn('Could not load status counts:', err);
+      const result = await fetchOrdersList({
+        statusIn: PENDING_ONLY_STATUSES,
+        sortBy: 'placed_at_desc',
+        page: 1,
+        pageSize: PAGE_SIZE,
+      });
+
+      const pendingOnly = result.orders.filter((o) => o.status === 'pending');
+      setOrders(pendingOnly);
+      setTotalCount(result.totalCount);
+      setPage(1);
+      setHasMore(result.orders.length >= PAGE_SIZE && result.orders.length < result.totalCount);
+    } catch (err: any) {
+      console.error('Failed to load pending orders:', err);
+      setError(err.message || 'Failed to load pending orders.');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
     }
   }, []);
 
-  // Synchronize state with URL parameters
   useEffect(() => {
-    const s = searchParams.get('status') as 'all' | OrderStatus;
-    if (s && s !== statusTab) {
-      setStatusTab(s);
-      setPage(1);
-    }
-  }, [searchParams]);
+    loadInitialOrders();
+  }, [loadInitialOrders]);
 
-  const loadOrders = useCallback(
-    async (isManual = false) => {
-      if (isManual) setRefreshing(true);
-      else setLoading(true);
-      setError(null);
-
-      try {
-        const filters: Partial<OrderFilters> = {
-          status: statusTab,
-          paymentStatus: paymentStatusFilter as any,
-          paymentMethod: paymentMethodFilter as any,
-          dateRange: dateRangeFilter as any,
-          customStartDate: customStartDate || undefined,
-          customEndDate: customEndDate || undefined,
-          searchQuery,
-          sortBy,
-          page,
-          pageSize,
-        };
-
-        const [result] = await Promise.all([
-          fetchOrdersList(filters),
-          loadStatusCounts(),
-        ]);
-        setOrders(result.orders);
-        setTotalCount(result.totalCount);
-      } catch (err: any) {
-        console.error('Failed to fetch orders:', err);
-        setError(err.message || 'Failed to load orders.');
-      } finally {
-        setLoading(false);
-        setRefreshing(false);
-      }
-    },
-    [
-      statusTab,
-      paymentStatusFilter,
-      paymentMethodFilter,
-      dateRangeFilter,
-      customStartDate,
-      customEndDate,
-      searchQuery,
-      sortBy,
-      page,
-      pageSize,
-      loadStatusCounts,
-    ]
-  );
-
-  useEffect(() => {
-    loadOrders();
-  }, [loadOrders]);
-
-  // Realtime subscription: new orders appear instantly without refresh
+  // Realtime subscription: new pending orders arrive automatically, accepted orders are removed
   useEffect(() => {
     const channel = supabase
-      .channel('admin_orders_realtime')
+      .channel('admin_pending_orders_realtime_list')
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'orders' },
-        () => {
-          loadOrders(false);
+        (payload: any) => {
+          if (payload?.eventType === 'UPDATE' && payload?.new) {
+            if (payload.new.status !== 'pending') {
+              setOrders((prev) => prev.filter((o) => o.id !== payload.new.id));
+              return;
+            }
+          }
+          loadInitialOrders(true);
         }
       )
       .subscribe();
@@ -199,206 +91,76 @@ export const OrdersListPage: React.FC = () => {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [loadOrders]);
+  }, [loadInitialOrders]);
 
-  const handleStatusChange = (newStatus: 'all' | OrderStatus) => {
-    setStatusTab(newStatus);
-    setPage(1);
-    const newParams = new URLSearchParams(searchParams);
-    if (newStatus === 'all') {
-      newParams.delete('status');
-    } else {
-      newParams.set('status', newStatus);
-    }
-    setSearchParams(newParams);
-  };
+  // Infinite scroll loader: loads next pages as user scrolls
+  const loadMoreOrders = useCallback(async () => {
+    if (loadingMore || !hasMore || loading) return;
+    setLoadingMore(true);
 
-  const handleResetFilters = () => {
-    setStatusTab('all');
-    setPaymentStatusFilter('all');
-    setPaymentMethodFilter('all');
-    setDateRangeFilter('all');
-    setCustomStartDate('');
-    setCustomEndDate('');
-    setSearchQuery('');
-    setSortBy('placed_at_desc');
-    setPage(1);
-    setSearchParams({});
-  };
-
-  const hasActiveFilters =
-    statusTab !== 'all' ||
-    paymentStatusFilter !== 'all' ||
-    paymentMethodFilter !== 'all' ||
-    dateRangeFilter !== 'all' ||
-    Boolean(searchQuery.trim());
-
-  const handleExportCSV = () => {
-    exportOrdersToCSV(
-      orders,
-      `giriraj_orders_${statusTab}_${new Date().toISOString().slice(0, 10)}.csv`
-    );
-  };
-
-  const handleDeleteOrder = async (e: React.MouseEvent, orderId: string) => {
-    e.stopPropagation();
-    if (
-      !window.confirm(
-        'Are you sure you want to permanently delete this order?\n\nThis will remove the order and its items from user history and operational records. This cannot be undone.'
-      )
-    ) {
-      return;
-    }
-
-    setDeletingOrderId(orderId);
     try {
-      await deleteOrder(orderId);
-      await Promise.all([loadOrders(true), loadStatusCounts()]);
-    } catch (err: any) {
-      alert(err.message || 'Failed to delete order.');
-    } finally {
-      setDeletingOrderId(null);
-    }
-  };
+      const nextPage = page + 1;
+      const result = await fetchOrdersList({
+        statusIn: PENDING_ONLY_STATUSES,
+        sortBy: 'placed_at_desc',
+        page: nextPage,
+        pageSize: PAGE_SIZE,
+      });
 
-  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+      const pendingOnly = result.orders.filter((o) => o.status === 'pending');
+      if (pendingOnly.length > 0) {
+        setOrders((prev) => {
+          const existingIds = new Set(prev.map((o) => o.id));
+          const newUnique = pendingOnly.filter((o) => !existingIds.has(o.id));
+          return [...prev, ...newUnique];
+        });
+        setPage(nextPage);
+        if (result.orders.length < PAGE_SIZE) {
+          setHasMore(false);
+        }
+      } else {
+        setHasMore(false);
+      }
+    } catch (err: any) {
+      console.error('Error loading more orders:', err);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [loadingMore, hasMore, loading, page]);
+
+  // Infinite scroll IntersectionObserver
+  useEffect(() => {
+    const target = observerRef.current;
+    if (!target) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && hasMore && !loadingMore && !loading) {
+          loadMoreOrders();
+        }
+      },
+      { threshold: 0.1, rootMargin: '250px' }
+    );
+
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [loadMoreOrders, hasMore, loadingMore, loading]);
+
+  const pendingOrders = orders.filter((o) => o.status === 'pending');
 
   return (
-    <div className="space-y-3 sm:space-y-4">
-      {/* Search & Filter Toolbar */}
-      <div className="bg-white rounded-xl border border-slate-200 p-2.5 sm:p-3 shadow-2xs space-y-2">
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-          {/* Search Input */}
-          <div className="relative flex-1">
-            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => {
-                setSearchQuery(e.target.value);
-                setPage(1);
-              }}
-              placeholder="Search recipient name, phone, order ID, or PIN..."
-              className="w-full pl-8 pr-7 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-amber-500 focus:border-amber-500 font-sans"
-            />
-            {searchQuery && (
-              <button
-                type="button"
-                onClick={() => {
-                  setSearchQuery('');
-                  setPage(1);
-                }}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5 cursor-pointer"
-                title="Clear search"
-              >
-                <X className="w-3 h-3" />
-              </button>
-            )}
-          </div>
-
-          {/* Quick Filter Selects */}
-          <div className="flex items-center gap-1.5 flex-wrap sm:flex-nowrap">
-            {/* Payment Status */}
-            <select
-              value={paymentStatusFilter}
-              onChange={(e) => {
-                setPaymentStatusFilter(e.target.value);
-                setPage(1);
-              }}
-              className="px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-700 font-medium focus:outline-none focus:ring-1 focus:ring-amber-500 cursor-pointer"
-            >
-              <option value="all">All Payment</option>
-              <option value="paid">Paid</option>
-              <option value="pending">Pending</option>
-              <option value="cod">COD</option>
-              <option value="failed">Failed</option>
-            </select>
-
-            {/* Date Range */}
-            <select
-              value={dateRangeFilter}
-              onChange={(e) => {
-                setDateRangeFilter(e.target.value);
-                setPage(1);
-              }}
-              className="px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-700 font-medium focus:outline-none focus:ring-1 focus:ring-amber-500 cursor-pointer"
-            >
-              <option value="all">All Dates</option>
-              <option value="today">Today</option>
-              <option value="last7">Last 7 Days</option>
-              <option value="last30">Last 30 Days</option>
-              <option value="custom">Custom Date Range...</option>
-            </select>
-
-            {/* Sort Dropdown */}
-            <select
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value as any)}
-              className="px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-700 font-medium focus:outline-none focus:ring-1 focus:ring-amber-500 cursor-pointer font-mono-code"
-            >
-              <option value="placed_at_desc">Newest</option>
-              <option value="placed_at_asc">Oldest</option>
-              <option value="total_desc">Highest ₹</option>
-              <option value="total_asc">Lowest ₹</option>
-            </select>
-
-            {/* Clear Filters Button */}
-            {hasActiveFilters && (
-              <button
-                type="button"
-                onClick={handleResetFilters}
-                className="px-2 py-1.5 text-xs font-semibold text-rose-700 hover:text-rose-900 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg transition cursor-pointer flex items-center gap-1"
-                title="Reset filters"
-              >
-                <X className="w-3 h-3" />
-                <span className="hidden sm:inline">Reset</span>
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* Custom Date Range Picker */}
-        {dateRangeFilter === 'custom' && (
-          <div className="pt-2 border-t border-slate-100 flex flex-wrap items-center gap-2 text-xs">
-            <span className="font-semibold text-slate-600">Custom:</span>
-            <input
-              type="date"
-              value={customStartDate}
-              onChange={(e) => setCustomStartDate(e.target.value)}
-              className="px-2 py-1 bg-slate-50 border border-slate-200 rounded text-xs text-slate-800"
-            />
-            <span className="text-slate-400">to</span>
-            <input
-              type="date"
-              value={customEndDate}
-              onChange={(e) => setCustomEndDate(e.target.value)}
-              className="px-2 py-1 bg-slate-50 border border-slate-200 rounded text-xs text-slate-800"
-            />
-            <button
-              type="button"
-              onClick={() => {
-                setPage(1);
-                loadOrders(true);
-              }}
-              className="px-2.5 py-1 bg-amber-500 text-slate-950 font-bold text-xs rounded hover:bg-amber-400 transition cursor-pointer"
-            >
-              Apply
-            </button>
-          </div>
-        )}
-      </div>
-
-      {/* Error state */}
+    <div className="space-y-4">
+      {/* Error Banner */}
       {error && (
-        <div className="p-4 bg-rose-50 border border-rose-200 text-rose-800 text-xs sm:text-sm rounded-lg flex items-start gap-2.5">
+        <div className="p-3.5 bg-rose-50 border border-rose-200 text-rose-800 text-xs sm:text-sm rounded-xl flex items-start gap-2.5">
           <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
           <div className="flex-1">
-            <span className="font-semibold">Query Error: </span>
+            <span className="font-semibold">Error: </span>
             {error}
           </div>
           <button
             type="button"
-            onClick={() => loadOrders(true)}
+            onClick={() => loadInitialOrders(true)}
             className="text-xs font-semibold underline text-rose-900 hover:text-rose-700 cursor-pointer"
           >
             Retry
@@ -406,317 +168,162 @@ export const OrdersListPage: React.FC = () => {
         </div>
       )}
 
-      {/* Orders Table Container */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
-        {loading ? (
-          <div className="p-6 space-y-3">
-            <div className="h-12 bg-slate-100 animate-pulse rounded"></div>
-            <div className="h-12 bg-slate-100 animate-pulse rounded"></div>
-            <div className="h-12 bg-slate-100 animate-pulse rounded"></div>
-            <div className="h-12 bg-slate-100 animate-pulse rounded"></div>
+      {/* Loading state */}
+      {loading ? (
+        <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center">
+          <RefreshCw className="w-8 h-8 text-amber-500 animate-spin mx-auto mb-3" />
+          <p className="text-sm font-semibold text-slate-700">Loading pending orders...</p>
+        </div>
+      ) : pendingOrders.length === 0 ? (
+        <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center space-y-3">
+          <div className="w-12 h-12 rounded-full bg-emerald-50 border border-emerald-200 flex items-center justify-center mx-auto text-emerald-600">
+            <CheckCircle2 className="w-6 h-6" />
           </div>
-        ) : orders.length === 0 ? (
-          <div className="p-12 text-center text-slate-500">
-            <Package className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-            <h3 className="text-base font-bold text-slate-800">No matching orders found</h3>
-            <p className="text-xs text-slate-500 max-w-sm mx-auto mt-1">
-              {hasActiveFilters
-                ? 'Try clearing active search queries or adjusting your status/payment filters.'
-                : 'There are currently no orders in this view.'}
-            </p>
-            {hasActiveFilters && (
-              <button
-                type="button"
-                onClick={handleResetFilters}
-                className="mt-4 px-3.5 py-1.5 bg-amber-500 text-slate-950 font-semibold text-xs rounded-lg hover:bg-amber-400 transition cursor-pointer"
+          <h3 className="text-base font-bold text-slate-900">All caught up!</h3>
+          <p className="text-xs sm:text-sm text-slate-500 max-w-md mx-auto">
+            There are currently no new pending orders waiting for warehouse confirmation.
+          </p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3.5 sm:gap-4">
+          {pendingOrders.map((order) => {
+            const items = order.order_items || [];
+            const isUrgent = order.placed_at
+              ? new Date().getTime() - new Date(order.placed_at).getTime() > 15 * 60 * 1000
+              : false;
+
+            return (
+              <div
+                key={order.id}
+                id={`pending-card-${order.id}`}
+                className={`bg-white rounded-xl border transition-all duration-150 p-3 sm:p-3.5 flex flex-col justify-between shadow-2xs hover:shadow-xs ${
+                  isUrgent ? 'border-amber-400 ring-1 ring-amber-300/70' : 'border-slate-200 hover:border-slate-300'
+                }`}
               >
-                Clear All Filters
-              </button>
-            )}
-          </div>
-        ) : (
-          <>
-            {/* Desktop Table View */}
-            <div className="hidden md:block overflow-x-auto">
-              <table className="w-full text-left text-xs sm:text-sm">
-                <thead className="bg-slate-50 text-slate-600 text-[11px] font-mono-code uppercase border-b border-slate-200">
-                  <tr>
-                    <th className="py-3 px-4">Order ID</th>
-                    <th className="py-3 px-4">Placed Date</th>
-                    <th className="py-3 px-4">Recipient / Phone</th>
-                    <th className="py-3 px-4">Shipping Destination</th>
-                    <th className="py-3 px-4 text-center">Items</th>
-                    <th className="py-3 px-4 text-right">Order Total</th>
-                    <th className="py-3 px-4 text-center">Status</th>
-                    <th className="py-3 px-4 text-right">Action</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 text-slate-800">
-                  {orders.map((order) => {
-                    const statusCfg = getStatusConfig(order.status);
-                    const payBadge = getPaymentBadge(order.payment_status);
-
-                    return (
-                      <tr
-                        key={order.id}
-                        onClick={() => navigate(`/orders/${order.id}`)}
-                        className="hover:bg-slate-50/80 transition cursor-pointer group"
-                      >
-                        {/* Order ID */}
-                        <td className="py-3.5 px-4 font-mono-code font-bold text-slate-900 group-hover:text-amber-700">
-                          {formatShortId(order.id)}
-                        </td>
-
-                        {/* Placed At */}
-                        <td className="py-3.5 px-4 text-slate-500 text-xs">
-                          {formatDateTime(order.placed_at)}
-                        </td>
-
-                        {/* Recipient */}
-                        <td className="py-3.5 px-4 font-medium">
-                          <div className="font-semibold text-slate-900">{order.recipient_name}</div>
-                          <div className="text-[11px] text-slate-500 font-mono-code flex items-center gap-1">
-                            <Phone className="w-3 h-3 opacity-60" />
-                            {order.recipient_phone}
-                          </div>
-                        </td>
-
-                        {/* Address */}
-                        <td className="py-3.5 px-4 text-slate-600 text-xs max-w-xs">
-                          <div className="truncate" title={order.address_line1}>
-                            {order.address_line1}
-                          </div>
-                          <div className="text-[11px] text-slate-400 font-mono-code">
-                            {order.city}, {order.state} - {order.pincode}
-                          </div>
-                        </td>
-
-                        {/* Items Count */}
-                        <td className="py-3.5 px-4 text-center font-mono-code font-semibold text-slate-700">
-                          {order.item_count ?? 0}
-                        </td>
-
-                        {/* Total Amount */}
-                        <td className="py-3.5 px-4 text-right font-mono-code font-bold text-slate-900">
-                          <div>{formatCurrency(order.total_amount)}</div>
-                          <span
-                            className={`inline-block text-[10px] px-1.5 py-0.2 rounded font-sans border font-medium ${payBadge.bg} ${payBadge.text} ${payBadge.border}`}
-                          >
-                            {payBadge.label}
-                          </span>
-                        </td>
-
-                        {/* Status */}
-                        <td className="py-3.5 px-4 text-center">
-                          <div className="flex flex-col items-center gap-1">
-                            <span
-                              className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium border ${statusCfg.bg} ${statusCfg.text} ${statusCfg.border}`}
-                            >
-                              <span className={`w-1.5 h-1.5 rounded-full ${statusCfg.dotBg}`} />
-                              {statusCfg.label}
-                            </span>
-                            {order.status === 'cancelled' && order.refund_status && order.refund_status !== 'not_applicable' && (
-                              <span
-                                className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold border ${
-                                  getRefundBadge(order.refund_status).pillBg
-                                }`}
-                              >
-                                {getRefundBadge(order.refund_status).label}
-                              </span>
-                            )}
-                          </div>
-                        </td>
-
-                        {/* Action */}
-                        <td className="py-3.5 px-4 text-right">
-                          <div className="flex items-center justify-end gap-2">
-                            <button
-                              type="button"
-                              onClick={(e) => handleDeleteOrder(e, order.id)}
-                              disabled={deletingOrderId === order.id}
-                              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition cursor-pointer disabled:opacity-50"
-                              title="Delete order permanently from user history"
-                            >
-                              {deletingOrderId === order.id ? (
-                                <Loader2 className="w-3.5 h-3.5 animate-spin text-rose-600" />
-                              ) : (
-                                <Trash2 className="w-3.5 h-3.5" />
-                              )}
-                            </button>
-                            <span className="inline-flex items-center gap-1 text-xs font-semibold text-amber-700 group-hover:text-amber-800">
-                              Workspace <ChevronRight className="w-3.5 h-3.5" />
-                            </span>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Mobile Card List View */}
-            <div className="md:hidden divide-y divide-slate-100">
-              {orders.map((order) => {
-                const statusCfg = getStatusConfig(order.status);
-                const payBadge = getPaymentBadge(order.payment_status);
-
-                return (
-                  <div
-                    key={order.id}
-                    onClick={() => navigate(`/orders/${order.id}`)}
-                    className="p-4 hover:bg-slate-50 transition cursor-pointer space-y-2.5"
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="font-mono-code font-bold text-slate-900 text-sm">
-                        {formatShortId(order.id)}
-                      </div>
-                      <div className="flex items-center gap-1.5">
-                        {order.status === 'cancelled' && order.refund_status && order.refund_status !== 'not_applicable' && (
-                          <span
-                            className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold border ${
-                              getRefundBadge(order.refund_status).pillBg
-                            }`}
-                          >
-                            {getRefundBadge(order.refund_status).label}
+                {/* Card Header */}
+                <div className="space-y-2.5">
+                  <div className="flex items-start justify-between gap-2 pb-2 border-b border-slate-100">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <Link
+                          to={`/orders/${order.id}`}
+                          className="font-mono-code font-bold text-xs text-slate-900 hover:text-amber-600 transition"
+                        >
+                          #{formatShortId(order.id)}
+                        </Link>
+                        {isUrgent && (
+                          <span className="px-1.5 py-0.2 bg-rose-100 text-rose-800 text-[10px] font-bold rounded font-mono-code uppercase">
+                            Overdue
                           </span>
                         )}
-                        <span
-                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium border ${statusCfg.bg} ${statusCfg.text} ${statusCfg.border}`}
-                        >
-                          <span className={`w-1.5 h-1.5 rounded-full ${statusCfg.dotBg}`} />
-                          {statusCfg.label}
+                      </div>
+
+                      {/* Date & Time beside Just Now / Elapsed Time */}
+                      <div className="flex items-center gap-1.5 flex-wrap text-[10.5px] text-slate-500 font-mono-code mt-0.5">
+                        <span className="flex items-center gap-1 font-medium text-amber-700">
+                          <Clock className="w-3 h-3 text-amber-500 shrink-0" />
+                          {order.placed_at ? formatTimeElapsed(order.placed_at) : 'Just now'}
                         </span>
+                        {order.placed_at && (
+                          <>
+                            <span className="text-slate-300">•</span>
+                            <span className="text-slate-600">{formatDateTime(order.placed_at)}</span>
+                          </>
+                        )}
                       </div>
                     </div>
 
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <div className="font-semibold text-slate-900 text-sm">
-                          {order.recipient_name}
-                        </div>
-                        <div className="text-xs text-slate-500 font-mono-code mt-0.5 flex items-center gap-1">
-                          <Phone className="w-3 h-3 text-slate-400" />
-                          {order.recipient_phone}
-                        </div>
-                        <div className="text-xs text-slate-500 mt-1">
-                          {order.city}, {order.pincode}
-                        </div>
+                    <div className="text-right shrink-0">
+                      <div className="text-sm font-bold text-slate-900">
+                        {formatCurrency(order.total_amount)}
                       </div>
-
-                      <div className="text-right font-mono-code">
-                        <div className="font-bold text-slate-900 text-base">
-                          {formatCurrency(order.total_amount)}
-                        </div>
-                        <span
-                          className={`inline-block text-[10px] px-1.5 py-0.2 rounded font-sans border font-medium mt-1 ${payBadge.bg} ${payBadge.text} ${payBadge.border}`}
-                        >
-                          {payBadge.label}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-400">
-                      <span>{formatDateTime(order.placed_at)}</span>
-                      <div className="flex items-center gap-3">
-                        <button
-                          type="button"
-                          onClick={(e) => handleDeleteOrder(e, order.id)}
-                          disabled={deletingOrderId === order.id}
-                          className="flex items-center gap-1 text-rose-600 hover:text-rose-700 font-medium px-2 py-0.5 rounded hover:bg-rose-50 transition cursor-pointer"
-                        >
-                          {deletingOrderId === order.id ? (
-                            <Loader2 className="w-3 h-3 animate-spin" />
-                          ) : (
-                            <Trash2 className="w-3 h-3" />
-                          )}
-                          <span>Delete</span>
-                        </button>
-                        <span className="font-semibold text-amber-700 flex items-center gap-0.5">
-                          Manage <ChevronRight className="w-3 h-3" />
-                        </span>
-                      </div>
+                      <span className="text-[10px] font-mono-code uppercase px-1.5 py-0.2 rounded bg-slate-100 text-slate-600 font-medium">
+                        {order.payment_method || 'COD'}
+                      </span>
                     </div>
                   </div>
-                );
-              })}
-            </div>
 
-            {/* Pagination Controls */}
-            <div className="p-3 sm:p-4 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-slate-600">
-              <div className="flex items-center gap-2">
-                <span>
-                  Showing{' '}
-                  <span className="font-bold font-mono-code">
-                    {totalCount === 0 ? 0 : (page - 1) * pageSize + 1}
-                  </span>{' '}
-                  to{' '}
-                  <span className="font-bold font-mono-code">
-                    {Math.min(page * pageSize, totalCount)}
-                  </span>{' '}
-                  of <span className="font-bold font-mono-code">{totalCount}</span> orders
-                </span>
+                  {/* Customer Info */}
+                  <div className="space-y-1 text-xs">
+                    <div className="flex items-center gap-1.5 font-bold text-slate-900">
+                      <User className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                      <span className="truncate">{order.recipient_name}</span>
+                    </div>
 
-                <select
-                  value={pageSize}
-                  onChange={(e) => {
-                    setPageSize(Number(e.target.value));
-                    setPage(1);
-                  }}
-                  className="ml-2 px-2 py-1 bg-white border border-slate-200 rounded text-xs text-slate-700 font-mono-code"
-                >
-                  <option value="15">15 / page</option>
-                  <option value="25">25 / page</option>
-                  <option value="50">50 / page</option>
-                </select>
+                    <div className="flex items-center gap-1.5 text-slate-600 font-mono-code text-[11px]">
+                      <Phone className="w-3 h-3 text-slate-400 shrink-0" />
+                      <a href={`tel:${order.recipient_phone}`} className="hover:underline hover:text-slate-900">
+                        {order.recipient_phone}
+                      </a>
+                    </div>
+
+                    <div className="flex items-start gap-1.5 text-slate-500 text-[11px]">
+                      <MapPin className="w-3 h-3 text-slate-400 shrink-0 mt-0.5" />
+                      <span className="line-clamp-2">
+                        {order.address_line1}, {order.city} - {order.pincode}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Order Items Preview */}
+                  <div className="bg-slate-50 rounded-lg p-2 space-y-1 border border-slate-100">
+                    <div className="flex items-center justify-between text-[11px] font-semibold text-slate-700">
+                      <span className="flex items-center gap-1">
+                        <ShoppingBag className="w-3 h-3 text-slate-400" />
+                        Items ({order.item_count || items.length})
+                      </span>
+                    </div>
+
+                    <div className="space-y-1 max-h-20 overflow-y-auto custom-scrollbar pr-1">
+                      {items.length > 0 ? (
+                        items.map((it) => (
+                          <div key={it.id} className="flex items-center justify-between text-xs text-slate-600">
+                            <span className="truncate font-medium">
+                              {it.quantity}x {it.product_name}
+                            </span>
+                            <span className="font-mono-code text-[11px] text-slate-500 shrink-0 ml-2">
+                              {formatCurrency(it.price_at_purchase * it.quantity)}
+                            </span>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="text-[11px] text-slate-400 italic">No item breakdown available</div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Center Long Red Liquid Apple Glassmorphism Pending Button */}
+                <div className="mt-2.5 pt-2.5 border-t border-slate-100 flex items-center justify-center w-full">
+                  <Link
+                    to={`/orders/${order.id}`}
+                    id={`btn-pending-action-${order.id}`}
+                    className="w-full sm:w-[94%] relative overflow-hidden flex items-center justify-center gap-2 py-2.5 px-6 rounded-2xl font-bold text-xs sm:text-sm text-white tracking-wider uppercase shadow-[0_8px_20px_-3px_rgba(239,68,68,0.45),inset_0_1px_1.5px_0_rgba(255,255,255,0.55),inset_0_-2px_4px_0_rgba(0,0,0,0.2)] bg-gradient-to-r from-red-600 via-rose-600 to-red-600 backdrop-blur-xl border border-white/35 cursor-pointer select-none"
+                    title="View pending order details"
+                  >
+                    {/* Liquid Apple Glass Surface Sheen & Specular Reflection */}
+                    <div className="absolute inset-x-0 top-0 h-[48%] bg-gradient-to-b from-white/35 via-white/10 to-transparent pointer-events-none rounded-t-2xl" />
+
+                    {/* Button Content */}
+                    <span className="relative z-10 flex items-center justify-center gap-2 drop-shadow-xs">
+                      <span className="w-2 h-2 rounded-full bg-white shadow-[0_0_8px_rgba(255,255,255,0.95)] animate-pulse" />
+                      <span>Pending</span>
+                    </span>
+                  </Link>
+                </div>
               </div>
+            );
+          })}
+        </div>
+      )}
 
-              {/* Page Navigator */}
-              <div className="flex items-center gap-1">
-                <button
-                  type="button"
-                  onClick={() => setPage(1)}
-                  disabled={page <= 1}
-                  className="p-1.5 rounded bg-white border border-slate-200 text-slate-600 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
-                  title="First Page"
-                >
-                  <ChevronsLeft className="w-4 h-4" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}
-                  disabled={page <= 1}
-                  className="p-1.5 rounded bg-white border border-slate-200 text-slate-600 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
-                  title="Previous Page"
-                >
-                  <ChevronLeft className="w-4 h-4" />
-                </button>
-
-                <span className="px-2.5 py-1 font-mono-code text-xs font-bold text-slate-800">
-                  {page} / {totalPages}
-                </span>
-
-                <button
-                  type="button"
-                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                  disabled={page >= totalPages}
-                  className="p-1.5 rounded bg-white border border-slate-200 text-slate-600 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
-                  title="Next Page"
-                >
-                  <ChevronRight className="w-4 h-4" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPage(totalPages)}
-                  disabled={page >= totalPages}
-                  className="p-1.5 rounded bg-white border border-slate-200 text-slate-600 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
-                  title="Last Page"
-                >
-                  <ChevronsRight className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-          </>
+      {/* Infinite Scroll Sentinel */}
+      <div ref={observerRef} className="py-2 text-center text-xs text-slate-400">
+        {loadingMore && (
+          <div className="flex items-center justify-center gap-2 py-3 text-slate-500">
+            <Loader2 className="w-4 h-4 animate-spin text-amber-600" />
+            <span>Loading more pending orders...</span>
+          </div>
         )}
       </div>
     </div>

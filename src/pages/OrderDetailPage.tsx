@@ -2,7 +2,7 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import { useAuth } from '../context/AuthContext';
-import { Order, OrderItem, OrderStatus, Delivery, DeliveryTrackingEvent, ProofOfDelivery } from '../types';
+import { Order, OrderItem, OrderStatus, Delivery, DeliveryTrackingEvent } from '../types';
 import {
   fetchOrderById,
   updateOrderStatus,
@@ -20,7 +20,6 @@ import { OrderStatusStepper } from '../components/OrderStatusStepper';
 import { PackingSlip } from '../components/PackingSlip';
 import { CustomerTrackingTimeline } from '../components/CustomerTrackingTimeline';
 import { AssignPartnerModal } from '../components/AssignPartnerModal';
-import { ProofOfDeliveryModal } from '../components/ProofOfDeliveryModal';
 import { FailedDeliveryModal } from '../components/FailedDeliveryModal';
 import {
   formatCurrency,
@@ -99,7 +98,6 @@ export const OrderDetailPage: React.FC = () => {
   const [deleting, setDeleting] = useState<boolean>(false);
   const [deleteModalError, setDeleteModalError] = useState<string | null>(null);
   const [showAssignModal, setShowAssignModal] = useState<boolean>(false);
-  const [showPodModal, setShowPodModal] = useState<boolean>(false);
   const [showFailedModal, setShowFailedModal] = useState<boolean>(false);
 
   const loadDetails = async () => {
@@ -168,10 +166,6 @@ export const OrderDetailPage: React.FC = () => {
     } finally {
       setUpdating(false);
     }
-  };
-
-  const handlePodSubmit = async (pod: ProofOfDelivery) => {
-    await handleDeliveryStatusChange('delivered', { proofOfDelivery: pod });
   };
 
   const handleFailedSubmit = async (reason: string, action: any, notes?: string) => {
@@ -543,7 +537,6 @@ export const OrderDetailPage: React.FC = () => {
           setShowCancelModal(true);
         }}
         onRequestAssignRider={() => setShowAssignModal(true)}
-        onRequestPod={() => setShowPodModal(true)}
         isUpdating={updating}
       />
 
@@ -922,14 +915,6 @@ export const OrderDetailPage: React.FC = () => {
 
                   <button
                     type="button"
-                    onClick={() => setShowPodModal(true)}
-                    className="flex items-center gap-1 px-3.5 py-1.5 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-xs transition"
-                  >
-                    <ShieldCheck className="w-3.5 h-3.5" /> 5. Mark Delivered (POD)
-                  </button>
-
-                  <button
-                    type="button"
                     onClick={() => setShowFailedModal(true)}
                     className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg transition"
                   >
@@ -1087,17 +1072,6 @@ export const OrderDetailPage: React.FC = () => {
           defaultNotes={order.delivery_notes}
           onClose={() => setShowAssignModal(false)}
           onAssign={handleAssignPartner}
-        />
-      )}
-
-      {/* Proof of Delivery Modal */}
-      {showPodModal && (
-        <ProofOfDeliveryModal
-          isOpen={true}
-          orderId={order.id}
-          recipientDefaultName={order.recipient_name}
-          onClose={() => setShowPodModal(false)}
-          onSubmit={handlePodSubmit}
         />
       )}
 

@@ -107,53 +107,36 @@ export const CancelledOrdersPage: React.FC = () => {
   });
 
   return (
-    <div className="space-y-5">
-      {/* Top Header Card */}
-      <div
-        id="cancelled-orders-header"
-        className="bg-white rounded-xl border border-slate-200/80 p-4 sm:p-5 shadow-xs transition-all"
-      >
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
-              Cancelled Orders
-            </h1>
-            <span className="px-2.5 py-0.5 rounded-md text-xs font-semibold bg-rose-50 text-rose-800 border border-rose-200">
-              {orders.length} cancelled
-            </span>
-          </div>
-
-          <div className="flex items-center gap-2.5 flex-wrap self-start md:self-center">
-            <button
-              id="btn-refresh-cancelled"
-              type="button"
-              onClick={() => loadCancelledOrders(true)}
-              disabled={refreshing || loading}
-              className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg transition cursor-pointer"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} />
-              <span>Refresh</span>
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Filter / Search Bar */}
-      <div className="bg-white rounded-xl border border-slate-200 p-3 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-3">
-        <div className="relative w-full sm:w-80">
+    <div className="space-y-4">
+      {/* Streamlined Search & Action Toolbar */}
+      <div className="bg-white rounded-xl border border-slate-200 p-2.5 sm:p-3 shadow-2xs flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
+        <div className="relative flex-1">
           <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
           <input
             id="input-search-cancelled"
             type="text"
-            placeholder="Search cancelled archive..."
+            placeholder="Search cancelled archive by customer, phone, ID, reason..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-rose-500 focus:bg-white transition"
+            className="w-full pl-9 pr-3 py-2 text-xs sm:text-sm bg-slate-50 border border-slate-200 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 focus:bg-white transition"
           />
         </div>
 
-        <div className="text-xs text-slate-500 font-mono-code">
-          Showing {filteredOrders.length} of {orders.length} cancelled
+        <div className="flex items-center justify-between sm:justify-end gap-2 shrink-0">
+          <span className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-rose-50 text-rose-800 border border-rose-200">
+            {orders.length} cancelled
+          </span>
+
+          <button
+            id="btn-refresh-cancelled"
+            type="button"
+            onClick={() => loadCancelledOrders(true)}
+            disabled={refreshing || loading}
+            className="flex items-center justify-center p-2 text-xs font-semibold text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg transition active:scale-95 cursor-pointer"
+            title="Refresh"
+          >
+            <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin text-rose-600' : ''}`} />
+          </button>
         </div>
       </div>
 

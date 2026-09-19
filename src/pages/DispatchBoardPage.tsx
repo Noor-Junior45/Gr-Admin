@@ -1,558 +1,370 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Link } from 'react-router-dom';
-import {
-  Truck,
-  UserPlus,
-  MapPin,
-  Clock,
-  CheckCircle2,
-  AlertTriangle,
-  Phone,
-  ShieldCheck,
-  ExternalLink,
-  ChevronRight,
-} from 'lucide-react';
-import { Order, DeliveryPartner, ProofOfDelivery } from '../types';
+import { useNavigate, Link } from 'react-router-dom';
+import { supabase } from '../lib/supabaseClient';
+import { Order, Delivery } from '../types';
 import { fetchOrdersList } from '../services/orderService';
 import {
-  fetchDeliveryPartners,
-  assignDeliveryPartner,
-  updateDeliveryStatus,
+  fetchDeliveryByOrderId,
 } from '../services/deliveryService';
-import { supabase } from '../lib/supabaseClient';
 import {
   formatCurrency,
-  formatTimeElapsed,
-  formatTimeOnly,
   formatShortId,
+  formatDateTime,
+  formatTimeElapsed,
 } from '../utils/formatters';
-import { AssignPartnerModal } from '../components/AssignPartnerModal';
-import { ProofOfDeliveryModal } from '../components/ProofOfDeliveryModal';
-import { FailedDeliveryModal } from '../components/FailedDeliveryModal';
+import {
+  Clock,
+  Phone,
+  ChevronRight,
+  AlertCircle,
+  Truck,
+  Bike,
+  MapPin,
+  User,
+  ShoppingBag,
+  RefreshCw,
+} from 'lucide-react';
 
-type LaneKey = 'unassigned' | 'assigned' | 'in_transit' | 'delivered' | 'failed';
+/**
+ * Live stopwatch/countdown format: computes hours, minutes, seconds elapsed
+ * since the order left the warehouse or was picked up.
+ */
+function formatLiveElapsed(isoString: string | null | undefined, nowMs: number): string {
+  if (!isoString) return '0s';
+  try {
+    const timestamp = new Date(isoString).getTime();
+    if (isNaN(timestamp)) return '0s';
+    const diffMs = Math.max(0, nowMs - timestamp);
+    const totalSecs = Math.floor(diffMs / 1000);
+    const hours = Math.floor(totalSecs / 3600);
+    const mins = Math.floor((totalSecs % 3600) / 60);
+    const secs = totalSecs % 60;
+
+    if (hours > 0) {
+      return `${hours}h ${mins}m ${secs}s`;
+    }
+    if (mins > 0) {
+      return `${mins}m ${secs}s`;
+    }
+    return `${secs}s`;
+  } catch {
+    return '0s';
+  }
+}
 
 export const DispatchBoardPage: React.FC = () => {
+  const navigate = useNavigate();
   const [orders, setOrders] = useState<Order[]>([]);
-  const [partners, setPartners] = useState<DeliveryPartner[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [deliveries, setDeliveries] = useState<Record<string, Delivery>>({});
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [now, setNow] = useState<number>(Date.now());
 
-  // Modals state
-  const [assignModalOrder, setAssignModalOrder] = useState<Order | null>(null);
-  const [podModalOrder, setPodModalOrder] = useState<Order | null>(null);
-  const [failedModalOrder, setFailedModalOrder] = useState<Order | null>(null);
-  const [processingOrderId, setProcessingOrderId] = useState<string | null>(null);
+  // Live timer tick every 1000ms so elapsed time since leaving warehouse counts in real time
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setNow(Date.now());
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
 
-  const loadData = useCallback(async (isSilent = false) => {
-    if (!isSilent) setIsLoading(true);
+  const loadDispatchedOrders = useCallback(async (isSilent = false) => {
+    if (!isSilent) setLoading(true);
+    setError(null);
+
     try {
-      const [orderRes, partnerList] = await Promise.all([
-        fetchOrdersList({ pageSize: 150 }),
-        fetchDeliveryPartners(),
-      ]);
+      // Only fetch orders that are already out from warehouse / left for delivery
+      const orderRes = await fetchOrdersList({ statusIn: ['shipped'], pageSize: 500 });
+
       setOrders(orderRes.orders);
-      setPartners(partnerList);
-    } catch (err) {
-      console.error('Failed to load dispatch board data:', err);
+
+      // Load associated delivery status/rider assignments for these orders
+      const delMap: Record<string, Delivery> = {};
+      await Promise.all(
+        orderRes.orders.map(async (order) => {
+          try {
+            const del = await fetchDeliveryByOrderId(order.id);
+            if (del) delMap[order.id] = del;
+          } catch {
+            // Ignore individual fetch failure
+          }
+        })
+      );
+      setDeliveries(delMap);
+    } catch (err: any) {
+      console.error('Failed to load dispatched orders queue:', err);
+      setError(err?.message || 'Failed to load dispatched orders queue');
     } finally {
-      setIsLoading(false);
+      setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    loadData();
+    loadDispatchedOrders();
 
-    // Listen to real-time changes on orders
-    const channel = supabase
-      .channel('dispatch_board_realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => {
-        loadData(true);
-      })
+    // Subscribe to realtime changes on orders & deliveries
+    const ordersChannel = supabase
+      .channel('dispatch_page_orders_realtime')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'orders' },
+        () => loadDispatchedOrders(true)
+      )
+      .subscribe();
+
+    const deliveriesChannel = supabase
+      .channel('dispatch_page_deliveries_realtime')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'deliveries' },
+        () => loadDispatchedOrders(true)
+      )
       .subscribe();
 
     return () => {
-      supabase.removeChannel(channel);
+      supabase.removeChannel(ordersChannel);
+      supabase.removeChannel(deliveriesChannel);
     };
-  }, [loadData]);
+  }, [loadDispatchedOrders]);
 
-  // Dispatch lifecycle handlers
-  const handleAssignSubmit = async (
-    partnerId: string,
-    estimatedMinutes: number,
-    notes?: string
-  ) => {
-    if (!assignModalOrder) return;
-    try {
-      const updatedDelivery = await assignDeliveryPartner(
-        assignModalOrder.id,
-        partnerId,
-        estimatedMinutes,
-        notes
-      );
-      setOrders((prev) =>
-        prev.map((o) =>
-          o.id === assignModalOrder.id
-            ? { ...o, status: 'packed', delivery: updatedDelivery }
-            : o
-        )
-      );
-      setAssignModalOrder(null);
-    } catch (err: any) {
-      alert(err.message || 'Failed to assign rider');
-    }
-  };
+  // Filter strictly for orders that have already left warehouse / are out for delivery
+  const outForDeliveryOrders = orders.filter((order) => {
+    const del = deliveries[order.id];
+    // Exclude completed/failed/cancelled
+    if (['delivered', 'cancelled', 'failed'].includes(order.status)) return false;
+    if (del?.status === 'delivered' || del?.status === 'failed') return false;
 
-  const handleStatusProgression = async (
-    orderId: string,
-    nextStatus: any,
-    extra?: any
-  ) => {
-    setProcessingOrderId(orderId);
-    try {
-      const updatedDelivery = await updateDeliveryStatus(orderId, nextStatus, extra);
-      setOrders((prev) =>
-        prev.map((o) => {
-          if (o.id === orderId) {
-            let updatedOrderStatus = o.status;
-            if (
-              nextStatus === 'picked_up' ||
-              nextStatus === 'out_for_delivery' ||
-              nextStatus === 'near_destination'
-            ) {
-              updatedOrderStatus = 'shipped';
-            } else if (nextStatus === 'delivered') {
-              updatedOrderStatus = 'delivered';
-            } else if (nextStatus === 'failed') {
-              updatedOrderStatus = 'failed';
-            }
-            return {
-              ...o,
-              status: updatedOrderStatus,
-              delivery: updatedDelivery,
-            };
-          }
-          return o;
-        })
-      );
-    } catch (err: any) {
-      alert(err.message || 'Failed to update delivery status');
-    } finally {
-      setProcessingOrderId(null);
-    }
-  };
-
-  const handlePodSubmit = async (pod: ProofOfDelivery) => {
-    if (!podModalOrder) return;
-    try {
-      await handleStatusProgression(podModalOrder.id, 'delivered', { proofOfDelivery: pod });
-      setPodModalOrder(null);
-    } catch (err: any) {
-      alert(err.message || 'Failed to record POD');
-    }
-  };
-
-  const handleFailedSubmit = async (
-    reason: string,
-    action: 'reschedule' | 'return_to_store' | 'refund',
-    notes?: string
-  ) => {
-    if (!failedModalOrder) return;
-    try {
-      await handleStatusProgression(failedModalOrder.id, 'failed', {
-        failureReason: reason,
-        failureAction: action,
-        notes,
-      });
-      setFailedModalOrder(null);
-    } catch (err: any) {
-      alert(err.message || 'Failed to report delivery issue');
-    }
-  };
-
-  // Group orders into Kanban lanes
-  const unassignedOrders = orders.filter(
-    (o) =>
-      (o.status === 'packed' || o.status === 'confirmed' || o.status === 'pending') &&
-      (!o.delivery || o.delivery.status === 'unassigned' || !o.delivery.delivery_partner_id)
-  );
-
-  const assignedOrders = orders.filter(
-    (o) =>
-      o.delivery?.delivery_partner_id &&
-      (o.delivery.status === 'assigned' || (!o.delivery.status && o.status === 'packed'))
-  );
-
-  const inTransitOrders = orders.filter(
-    (o) =>
-      o.delivery?.status === 'picked_up' ||
-      o.delivery?.status === 'out_for_delivery' ||
-      o.delivery?.status === 'near_destination' ||
-      (o.status === 'shipped' &&
-        o.delivery?.status !== 'delivered' &&
-        o.delivery?.status !== 'failed')
-  );
-
-  const deliveredOrders = orders.filter(
-    (o) => o.status === 'delivered' || o.delivery?.status === 'delivered'
-  );
-
-  const failedOrders = orders.filter(
-    (o) => o.status === 'failed' || o.delivery?.status === 'failed'
-  );
-
-  // Lane Configuration Definitions
-  const lanes = [
-    {
-      key: 'unassigned' as const,
-      title: 'Packed / Unassigned',
-      count: unassignedOrders.length,
-      dotColor: 'bg-slate-400',
-      badgeBg: 'bg-slate-100 text-slate-700',
-      orders: unassignedOrders,
-      emptyText: 'No packed orders waiting for rider assignment',
-    },
-    {
-      key: 'assigned' as const,
-      title: 'Rider Assigned',
-      count: assignedOrders.length,
-      dotColor: 'bg-cyan-500',
-      badgeBg: 'bg-cyan-100 text-cyan-800',
-      orders: assignedOrders,
-      emptyText: 'No assigned parcels currently awaiting pickup',
-    },
-    {
-      key: 'in_transit' as const,
-      title: 'Out for Delivery',
-      count: inTransitOrders.length,
-      dotColor: 'bg-blue-600 animate-pulse',
-      badgeBg: 'bg-blue-100 text-blue-800',
-      orders: inTransitOrders,
-      emptyText: 'No parcels currently in transit on the road',
-    },
-    {
-      key: 'delivered' as const,
-      title: 'Delivered & POD',
-      count: deliveredOrders.length,
-      dotColor: 'bg-emerald-500',
-      badgeBg: 'bg-emerald-100 text-emerald-800',
-      orders: deliveredOrders,
-      emptyText: 'No deliveries recorded yet',
-    },
-    {
-      key: 'failed' as const,
-      title: 'Action Needed',
-      count: failedOrders.length,
-      dotColor: 'bg-rose-500',
-      badgeBg: 'bg-rose-100 text-rose-800',
-      orders: failedOrders,
-      emptyText: 'No delivery issues reported',
-    },
-  ];
-
-  // Render individual dispatch order card
-  const renderCard = (order: Order, laneKey: LaneKey) => {
-    const isProcessing = processingOrderId === order.id;
-    const partner = order.delivery?.delivery_partner;
-    const isNearDestination = order.delivery?.status === 'near_destination';
-    const pod = order.delivery?.proof_of_delivery;
-
+    // Must be shipped or delivery marked picked_up / out_for_delivery / near_destination
     return (
-      <div
-        key={order.id}
-        className={`bg-white border rounded-xl p-4 shadow-2xs hover:shadow-xs transition-all space-y-3 ${
-          isNearDestination
-            ? 'border-amber-400 ring-2 ring-amber-400/20 bg-amber-50/10'
-            : laneKey === 'failed'
-            ? 'border-rose-200 hover:border-rose-300'
-            : laneKey === 'delivered'
-            ? 'border-emerald-200/80 hover:border-emerald-300'
-            : laneKey === 'assigned'
-            ? 'border-cyan-200/90 hover:border-cyan-300'
-            : laneKey === 'in_transit'
-            ? 'border-blue-200/90 hover:border-blue-300'
-            : 'border-slate-200/90 hover:border-slate-300'
-        }`}
-      >
-        {/* Card Header: Order ID + Placed Time + Amount */}
-        <div className="flex items-center justify-between gap-2">
-          <Link
-            to={`/orders/${order.id}`}
-            className="font-mono-code font-bold text-xs text-slate-900 hover:text-blue-600 flex items-center gap-1 transition"
-          >
-            <span>{formatShortId(order.id)}</span>
-            <ExternalLink className="w-3 h-3 text-slate-400" />
-          </Link>
-
-          <div className="flex items-center gap-2">
-            <span className="text-[11px] font-mono-code text-slate-400">
-              {formatTimeElapsed(order.placed_at)}
-            </span>
-            <span className="font-mono-code font-bold text-xs text-slate-900 bg-slate-100 px-2 py-0.5 rounded-md">
-              {formatCurrency(order.total_amount)}
-            </span>
-          </div>
-        </div>
-
-        {/* Customer & Destination Details Box */}
-        <div className="bg-slate-50/80 rounded-lg p-2.5 space-y-1.5 border border-slate-100">
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-xs font-bold text-slate-900 truncate">
-              {order.recipient_name || 'Valued Customer'}
-            </span>
-            {order.recipient_phone && (
-              <a
-                href={`tel:${order.recipient_phone}`}
-                className="inline-flex items-center gap-1 text-[11px] font-mono-code text-slate-600 hover:text-blue-600"
-                title="Call recipient"
-              >
-                <Phone className="w-3 h-3 text-slate-400" />
-                <span>{order.recipient_phone}</span>
-              </a>
-            )}
-          </div>
-
-          <div className="flex items-start gap-1.5 text-[11px] text-slate-600 leading-snug">
-            <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0 mt-0.5" />
-            <span className="line-clamp-2">
-              {order.address_line1}
-              {order.city ? `, ${order.city}` : ''}
-              {order.pincode ? ` - ${order.pincode}` : ''}
-            </span>
-          </div>
-        </div>
-
-        {/* Rider Info Box (if assigned or in transit) */}
-        {partner && (
-          <div className="bg-cyan-50/50 border border-cyan-100 rounded-lg p-2.5 text-xs space-y-1">
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-1.5 font-semibold text-cyan-950 truncate">
-                <Truck className="w-3.5 h-3.5 text-cyan-700 shrink-0" />
-                <span className="truncate">{partner.name}</span>
-              </div>
-              <span className="text-[10px] font-mono-code uppercase bg-cyan-100/70 text-cyan-800 px-1.5 py-0.5 rounded shrink-0">
-                {partner.vehicle_type || 'Rider'}
-              </span>
-            </div>
-
-            <div className="flex items-center justify-between text-[11px] text-cyan-800/80 pt-0.5">
-              {partner.phone ? (
-                <a
-                  href={`tel:${partner.phone}`}
-                  className="hover:underline flex items-center gap-1"
-                >
-                  <Phone className="w-3 h-3 text-cyan-600" />
-                  <span>{partner.phone}</span>
-                </a>
-              ) : (
-                <span className="text-slate-400">No phone on file</span>
-              )}
-
-              {order.delivery?.estimated_delivery_at && (
-                <span className="font-mono-code text-[10px] flex items-center gap-1 text-cyan-900 font-medium">
-                  <Clock className="w-3 h-3 text-cyan-600" />
-                  ETA: {formatTimeOnly(order.delivery.estimated_delivery_at)}
-                </span>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Proof of Delivery Info Box (Delivered Lane) */}
-        {pod && (
-          <div className="bg-emerald-50/70 border border-emerald-200/80 rounded-lg p-2.5 text-[11px] space-y-1">
-            <div className="flex items-center justify-between font-semibold text-emerald-900">
-              <span className="flex items-center gap-1">
-                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                <span>Received by: {pod.recipient_name || order.recipient_name}</span>
-              </span>
-              <span className="text-[10px] font-mono-code uppercase bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded">
-                {pod.method}
-              </span>
-            </div>
-            {order.delivered_at && (
-              <div className="text-slate-500 font-mono-code text-[10px]">
-                Completed: {formatTimeOnly(order.delivered_at)}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Delivery Failure Info Box (Action Needed Lane) */}
-        {laneKey === 'failed' && (
-          <div className="bg-rose-50/80 border border-rose-200 rounded-lg p-2.5 text-xs space-y-1">
-            <div className="flex items-center gap-1.5 font-bold text-rose-900">
-              <AlertTriangle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
-              <span>Issue: {order.delivery?.failure_reason || 'Delivery uncompleted'}</span>
-            </div>
-            <div className="text-[11px] text-rose-800">
-              Next Action: <span className="font-semibold">{order.delivery?.failure_action || 'Reschedule'}</span>
-            </div>
-          </div>
-        )}
-
-        {/* Action Buttons Box */}
-        <div className="pt-2 border-t border-slate-100">
-          {laneKey === 'unassigned' && (
-            <button
-              type="button"
-              onClick={() => setAssignModalOrder(order)}
-              className="w-full flex items-center justify-center gap-1.5 py-2 px-3 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-lg shadow-2xs transition cursor-pointer"
-            >
-              <UserPlus className="w-3.5 h-3.5" />
-              <span>Assign Delivery Rider</span>
-            </button>
-          )}
-
-          {laneKey === 'assigned' && (
-            <button
-              type="button"
-              disabled={isProcessing}
-              onClick={() => handleStatusProgression(order.id, 'picked_up')}
-              className="w-full flex items-center justify-center gap-1.5 py-2 px-3 text-xs font-semibold text-white bg-sky-600 hover:bg-sky-700 rounded-lg shadow-2xs transition cursor-pointer disabled:opacity-50"
-            >
-              <Truck className={`w-3.5 h-3.5 ${isProcessing ? 'animate-bounce' : ''}`} />
-              <span>{isProcessing ? 'Marking...' : 'Mark Picked Up (Dispatched)'}</span>
-            </button>
-          )}
-
-          {laneKey === 'in_transit' && (
-            <div className="space-y-2">
-              {!isNearDestination ? (
-                <button
-                  type="button"
-                  disabled={isProcessing}
-                  onClick={() =>
-                    handleStatusProgression(order.id, 'near_destination', {
-                      locationName: order.city,
-                    })
-                  }
-                  className="w-full flex items-center justify-center gap-1.5 py-1.5 px-3 text-xs font-medium text-amber-900 bg-amber-50 hover:bg-amber-100 border border-amber-300 rounded-lg transition cursor-pointer disabled:opacity-50"
-                >
-                  <MapPin className="w-3.5 h-3.5 text-amber-600" />
-                  <span>Send "Rider Nearby" Alert</span>
-                </button>
-              ) : (
-                <div className="w-full py-1 text-[11px] font-medium text-amber-900 bg-amber-100/70 border border-amber-200 rounded-lg text-center">
-                  Customer notified: Rider nearby
-                </div>
-              )}
-
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  disabled={isProcessing}
-                  onClick={() => setPodModalOrder(order)}
-                  className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-2xs transition cursor-pointer"
-                >
-                  <ShieldCheck className="w-3.5 h-3.5" />
-                  <span>Mark Delivered</span>
-                </button>
-
-                <button
-                  type="button"
-                  disabled={isProcessing}
-                  onClick={() => setFailedModalOrder(order)}
-                  className="py-2 px-3 text-xs font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg transition cursor-pointer"
-                  title="Report Delivery Issue"
-                >
-                  Issue
-                </button>
-              </div>
-            </div>
-          )}
-
-          {laneKey === 'delivered' && (
-            <Link
-              to={`/orders/${order.id}`}
-              className="w-full flex items-center justify-center gap-1 py-1.5 px-3 text-xs font-semibold text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg transition"
-            >
-              <span>View Order Record</span>
-              <ChevronRight className="w-3.5 h-3.5" />
-            </Link>
-          )}
-
-          {laneKey === 'failed' && (
-            <button
-              type="button"
-              onClick={() => setAssignModalOrder(order)}
-              className="w-full flex items-center justify-center gap-1.5 py-2 px-3 text-xs font-semibold text-rose-900 bg-rose-50 hover:bg-rose-100 border border-rose-300 rounded-lg transition cursor-pointer"
-            >
-              <UserPlus className="w-3.5 h-3.5 text-rose-700" />
-              <span>Reschedule / Reassign Rider</span>
-            </button>
-          )}
-        </div>
-      </div>
+      order.status === 'shipped' ||
+      del?.status === 'picked_up' ||
+      del?.status === 'out_for_delivery' ||
+      del?.status === 'near_destination'
     );
-  };
+  });
 
   return (
-    <div className="pb-12">
-      {/* Kanban Dispatch Columns Container */}
-      <div className="flex gap-4 overflow-x-auto pb-6 pt-1 items-start">
-        {lanes.map((lane) => (
-          <div
-            key={lane.key}
-            className="w-80 min-w-[310px] max-w-[340px] shrink-0 bg-slate-100/70 border border-slate-200/90 rounded-2xl p-3 space-y-3 min-h-[520px] flex flex-col"
-          >
-            {/* Lane Header */}
-            <div className="flex items-center justify-between pb-2.5 border-b border-slate-200/80">
-              <div className="flex items-center gap-2">
-                <span className={`w-2.5 h-2.5 rounded-full ${lane.dotColor}`} />
-                <h3 className="font-bold text-slate-800 text-xs uppercase tracking-wider font-mono-code">
-                  {lane.title}
-                </h3>
-              </div>
-              <span
-                className={`px-2 py-0.5 rounded-full text-xs font-mono-code font-bold ${lane.badgeBg}`}
-              >
-                {lane.count}
-              </span>
-            </div>
-
-            {/* Order Cards Stack */}
-            <div className="space-y-3 flex-1">
-              {lane.orders.length > 0 ? (
-                lane.orders.map((order) => renderCard(order, lane.key))
-              ) : (
-                <div className="flex flex-col items-center justify-center text-center p-8 text-slate-400 h-48 border-2 border-dashed border-slate-200 rounded-xl bg-slate-50/50">
-                  <p className="text-xs text-slate-500 font-medium">{lane.emptyText}</p>
-                </div>
-              )}
-            </div>
+    <div className="space-y-4">
+      {/* Error Alert */}
+      {error && (
+        <div className="p-3.5 bg-rose-50 border border-rose-200 text-rose-800 text-xs sm:text-sm rounded-xl flex items-start gap-2.5">
+          <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <span className="font-semibold">Error: </span>
+            {error}
           </div>
-        ))}
-      </div>
-
-      {/* Modals */}
-      {assignModalOrder && (
-        <AssignPartnerModal
-          isOpen={true}
-          orderId={assignModalOrder.id}
-          currentPartnerId={assignModalOrder.delivery?.delivery_partner_id}
-          defaultNotes={assignModalOrder.delivery_notes}
-          onClose={() => setAssignModalOrder(null)}
-          onAssign={handleAssignSubmit}
-        />
+          <button
+            type="button"
+            onClick={() => loadDispatchedOrders(false)}
+            className="text-xs font-semibold underline text-rose-900 hover:text-rose-700 cursor-pointer"
+          >
+            Retry
+          </button>
+        </div>
       )}
 
-      {podModalOrder && (
-        <ProofOfDeliveryModal
-          isOpen={true}
-          orderId={podModalOrder.id}
-          recipientDefaultName={podModalOrder.recipient_name}
-          onClose={() => setPodModalOrder(null)}
-          onSubmit={handlePodSubmit}
-        />
-      )}
+      {/* Orders Grid / Status States */}
+      {loading ? (
+        <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center">
+          <RefreshCw className="w-8 h-8 text-amber-500 animate-spin mx-auto mb-3" />
+          <p className="text-sm font-semibold text-slate-700">Loading dispatch queue...</p>
+        </div>
+      ) : outForDeliveryOrders.length === 0 ? (
+        <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center space-y-3">
+          <div className="w-12 h-12 rounded-full bg-sky-50 border border-sky-200 flex items-center justify-center mx-auto text-sky-600">
+            <Truck className="w-6 h-6" />
+          </div>
+          <h3 className="text-base font-bold text-slate-900">No orders currently out for delivery</h3>
+          <p className="text-xs sm:text-sm text-slate-500 max-w-md mx-auto">
+            Only orders that have already left the warehouse and are en route with a delivery rider appear here.
+          </p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3.5 sm:gap-4">
+          {outForDeliveryOrders.map((order) => {
+            const items = order.order_items || [];
+            const isPaid = ['paid', 'completed', 'success'].includes(
+              (order.payment_status || '').toLowerCase()
+            );
+            const delivery = deliveries[order.id] || order.delivery;
+            const assignedRider = delivery?.delivery_partner || (order as any).rider;
 
-      {failedModalOrder && (
-        <FailedDeliveryModal
-          isOpen={true}
-          orderId={failedModalOrder.id}
-          onClose={() => setFailedModalOrder(null)}
-          onSubmit={handleFailedSubmit}
-        />
+            // Timestamp when order left warehouse or was picked up by rider
+            const leftWarehouseTime =
+              delivery?.picked_up_at ||
+              delivery?.out_for_delivery_at ||
+              order.shipped_at ||
+              delivery?.updated_at ||
+              order.updated_at ||
+              order.placed_at;
+
+            return (
+              <div
+                key={order.id}
+                id={`dispatch-card-${order.id}`}
+                onClick={() => navigate(`/orders/${order.id}`)}
+                className="bg-white rounded-xl border border-slate-200 hover:border-slate-300 transition-all duration-150 p-3 sm:p-3.5 flex flex-col justify-between shadow-2xs hover:shadow-xs group cursor-pointer"
+              >
+                {/* Card Top & Middle Content */}
+                <div className="space-y-2.5">
+                  {/* Card Header: Order ID, Date/Time & Elapsed on left; Price & Paid badge on right */}
+                  <div className="flex items-start justify-between gap-2 pb-2 border-b border-slate-100">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <Link
+                          to={`/orders/${order.id}`}
+                          onClick={(e) => e.stopPropagation()}
+                          className="font-mono-code font-bold text-xs text-slate-900 hover:text-amber-600 transition"
+                        >
+                          #{formatShortId(order.id)}
+                        </Link>
+                      </div>
+
+                      {/* Date & Time beside Elapsed Time */}
+                      <div className="flex items-center gap-1.5 flex-wrap text-[10.5px] text-slate-500 font-mono-code mt-0.5">
+                        <span className="flex items-center gap-1 font-medium text-amber-700">
+                          <Clock className="w-3 h-3 text-amber-500 shrink-0" />
+                          {order.placed_at ? formatTimeElapsed(order.placed_at) : 'Just now'}
+                        </span>
+                        {order.placed_at && (
+                          <>
+                            <span className="text-slate-300">•</span>
+                            <span className="text-slate-600">{formatDateTime(order.placed_at)}</span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="text-right shrink-0">
+                      <div className="text-sm font-bold text-slate-900">
+                        {formatCurrency(order.total_amount)}
+                      </div>
+                      <div className="mt-0.5">
+                        {isPaid ? (
+                          <span
+                            className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded-full text-[10px] font-bold tracking-wider uppercase bg-emerald-500/15 text-emerald-800 border border-emerald-400/40"
+                            title="Payment verified"
+                          >
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                            Paid
+                          </span>
+                        ) : (
+                          <span
+                            className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded-full text-[10px] font-bold tracking-wider uppercase bg-amber-500/15 text-amber-900 border border-amber-400/40"
+                            title="Payment pending"
+                          >
+                            <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                            Unpaid
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Customer Info */}
+                  <div className="space-y-1 text-xs">
+                    <div className="flex items-center gap-1.5 font-bold text-slate-900">
+                      <User className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                      <span className="truncate">{order.recipient_name || 'Customer'}</span>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 text-slate-600 font-mono-code text-[11px]">
+                      <Phone className="w-3 h-3 text-slate-400 shrink-0" />
+                      <a
+                        href={`tel:${order.recipient_phone}`}
+                        onClick={(e) => e.stopPropagation()}
+                        className="hover:underline hover:text-slate-900"
+                      >
+                        {order.recipient_phone || 'N/A'}
+                      </a>
+                    </div>
+
+                    <div className="flex items-start gap-1.5 text-slate-500 text-[11px]">
+                      <MapPin className="w-3 h-3 text-slate-400 shrink-0 mt-0.5" />
+                      <span className="line-clamp-2">
+                        {[order.address_line1, order.city, order.pincode].filter(Boolean).join(', ')}
+                      </span>
+                    </div>
+
+                    {(assignedRider?.name || (order as any).rider_name) && (
+                      <div className="flex items-center gap-1.5 text-slate-600 font-mono-code text-[11px] pt-0.5">
+                        <Bike className="w-3 h-3 text-slate-400 shrink-0" />
+                        <span className="truncate">Rider: {assignedRider?.name || (order as any).rider_name}</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Order Items Preview */}
+                  <div className="bg-slate-50 rounded-lg p-2 space-y-1 border border-slate-100">
+                    <div className="flex items-center justify-between text-[11px] font-semibold text-slate-700">
+                      <span className="flex items-center gap-1">
+                        <ShoppingBag className="w-3 h-3 text-slate-400" />
+                        Items ({order.item_count || items.length || 1})
+                      </span>
+                    </div>
+
+                    <div className="space-y-1 max-h-20 overflow-y-auto custom-scrollbar pr-1">
+                      {items.length > 0 ? (
+                        items.map((it) => (
+                          <div key={it.id} className="flex items-center justify-between text-xs text-slate-600">
+                            <span className="truncate font-medium">
+                              {it.quantity}x {it.product_name}
+                            </span>
+                            <span className="font-mono-code text-[11px] text-slate-500 shrink-0 ml-2">
+                              {formatCurrency(it.price_at_purchase * it.quantity)}
+                            </span>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="text-[11px] text-slate-400 italic">No item breakdown available</div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Bottom Row: Liquid Glass Pill Buttons (Equal Length) */}
+                <div className="grid grid-cols-2 gap-2 w-full mt-2.5 pt-2.5 border-t border-slate-100">
+                  {/* Button 1: Left: Elapsed Time (Blue Liquid Glass Pill) */}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      navigate(`/orders/${order.id}`);
+                    }}
+                    title={`Time elapsed since parcel left warehouse: ${formatLiveElapsed(leftWarehouseTime, now)}`}
+                    className="relative overflow-hidden w-full h-8 sm:h-8.5 px-2.5 sm:px-3 rounded-full flex items-center justify-center gap-1.5 text-[11px] sm:text-xs font-semibold text-white bg-gradient-to-b from-blue-500 via-blue-600 to-blue-700 border border-blue-400/50 shadow-[inset_0_1px_1.5px_rgba(255,255,255,0.45),0_2px_5px_rgba(37,99,235,0.3)] backdrop-blur-md hover:from-blue-400 hover:to-blue-600 active:scale-[0.98] transition-all cursor-pointer group/time"
+                  >
+                    {/* Liquid glass top specular reflection */}
+                    <span className="pointer-events-none absolute inset-x-0 top-0 h-[46%] bg-gradient-to-b from-white/40 via-white/10 to-transparent rounded-t-full" />
+
+                    <Truck className="w-3.5 h-3.5 text-white/95 shrink-0 animate-pulse drop-shadow-xs" />
+                    <span className="truncate drop-shadow-xs font-mono-code">
+                      Left: {formatLiveElapsed(leftWarehouseTime, now)}
+                    </span>
+                  </button>
+
+                  {/* Button 2: Out for Delivery (Red Liquid Glass Pill) */}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      navigate(`/orders/${order.id}`);
+                    }}
+                    title="Out for delivery - click to view order details"
+                    className="relative overflow-hidden w-full h-8 sm:h-8.5 px-2.5 sm:px-3 rounded-full flex items-center justify-center gap-1.5 text-[11px] sm:text-xs font-semibold text-white bg-gradient-to-b from-red-500 via-red-600 to-red-700 border border-red-400/50 shadow-[inset_0_1px_1.5px_rgba(255,255,255,0.45),0_2px_5px_rgba(220,38,38,0.3)] backdrop-blur-md hover:from-red-400 hover:to-red-600 active:scale-[0.98] transition-all cursor-pointer group/dispatch"
+                  >
+                    {/* Liquid glass top specular reflection */}
+                    <span className="pointer-events-none absolute inset-x-0 top-0 h-[46%] bg-gradient-to-b from-white/40 via-white/10 to-transparent rounded-t-full" />
+
+                    <span className="w-1.5 h-1.5 rounded-full bg-white shadow-[0_0_5px_rgba(255,255,255,0.9)] animate-pulse shrink-0" />
+                    <span className="truncate drop-shadow-xs">Out for Delivery</span>
+                    <ChevronRight className="w-3 h-3 text-white/80 shrink-0 group-hover/dispatch:translate-x-0.5 transition-transform" />
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
       )}
     </div>
   );

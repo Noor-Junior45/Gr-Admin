@@ -1,73 +1,104 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Link } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
-import { Order, DeliveryPartner } from '../types';
-import { fetchOrdersList, updateOrderStatus, deleteOrder } from '../services/orderService';
+import { Order, Delivery, DeliveryPartner } from '../types';
+import { fetchOrdersList, fetchOrderById } from '../services/orderService';
 import {
   fetchDeliveryPartners,
+  fetchDeliveryByOrderId,
   assignDeliveryPartner,
+  fetchAllAssignedDeliveries,
 } from '../services/deliveryService';
 import {
   formatCurrency,
-  formatTimeElapsed,
   formatShortId,
   formatDateTime,
+  formatTimeElapsed,
 } from '../utils/formatters';
 import { AssignPartnerModal } from '../components/AssignPartnerModal';
-import { PackingSlip } from '../components/PackingSlip';
 import {
-  CheckCircle2,
-  Truck,
-  UserPlus,
-  Search,
-  RefreshCw,
-  Phone,
-  MapPin,
   Clock,
-  Printer,
-  ShieldCheck,
-  ArrowRight,
+  Phone,
+  ChevronRight,
+  AlertCircle,
+  Bike,
+  MapPin,
   User,
-  Navigation,
-  Send,
-  Boxes,
-  Trash2,
+  ShoppingBag,
+  RefreshCw,
 } from 'lucide-react';
 
 export const ReadyOrdersPage: React.FC = () => {
+  const navigate = useNavigate();
   const [orders, setOrders] = useState<Order[]>([]);
-  const [partners, setPartners] = useState<DeliveryPartner[]>([]);
+  const [deliveries, setDeliveries] = useState<Record<string, Delivery>>({});
+  const [, setPartners] = useState<DeliveryPartner[]>([]);
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [error, setError] = useState<string | null>(null);
   const [assigningOrder, setAssigningOrder] = useState<Order | null>(null);
-  const [selectedOrderForSlip, setSelectedOrderForSlip] = useState<Order | null>(null);
-  const [directDispatchingId, setDirectDispatchingId] = useState<string | null>(null);
 
   const loadReadyOrders = useCallback(async (isSilent = false) => {
     if (!isSilent) setLoading(true);
-    else setRefreshing(true);
+    setError(null);
 
     try {
-      const [orderRes, partnerList] = await Promise.all([
-        fetchOrdersList({ status: 'packed', pageSize: 150 }),
+      // 1. Fetch assigned deliveries across both Supabase & local storage
+      const [allDeliveriesMap, partnerList] = await Promise.all([
+        fetchAllAssignedDeliveries(),
         fetchDeliveryPartners(),
       ]);
-      setOrders(orderRes.orders);
+
+      // 2. Fetch active orders from database without restrictive status filtering
+      // so orders where a rider was assigned (even in pending, confirmed, packing, packed) are fully loaded
+      const orderRes = await fetchOrdersList({ pageSize: 500 });
+      let loadedOrders = orderRes.orders;
+
+      // 3. Check for any orders that have an assigned rider but were not in the initial order list
+      const loadedOrderIds = new Set(loadedOrders.map((o) => o.id));
+      const missingAssignedIds = Object.keys(allDeliveriesMap).filter(
+        (id) => !loadedOrderIds.has(id)
+      );
+
+      if (missingAssignedIds.length > 0) {
+        const extraOrders = await Promise.all(
+          missingAssignedIds.map(async (id) => {
+            try {
+              const res = await fetchOrderById(id);
+              return res.order;
+            } catch {
+              return null;
+            }
+          })
+        );
+        const validExtraOrders = extraOrders.filter((o): o is Order => Boolean(o));
+        loadedOrders = [...loadedOrders, ...validExtraOrders];
+      }
+
+      setOrders(loadedOrders);
       setPartners(partnerList);
-    } catch (err) {
-      console.error('Failed to load ready orders:', err);
+
+      // 4. Build comprehensive delivery map
+      const delMap: Record<string, Delivery> = { ...allDeliveriesMap };
+      loadedOrders.forEach((order) => {
+        if (order.delivery && !delMap[order.id]) {
+          delMap[order.id] = order.delivery;
+        }
+      });
+      setDeliveries(delMap);
+    } catch (err: any) {
+      console.error('Failed to load ready for rider queue:', err);
+      setError(err?.message || 'Failed to load ready for rider queue');
     } finally {
       setLoading(false);
-      setRefreshing(false);
     }
   }, []);
 
   useEffect(() => {
     loadReadyOrders();
 
-    const channel = supabase
-      .channel('ready_orders_realtime')
+    // Subscribe to realtime changes on orders & deliveries
+    const ordersChannel = supabase
+      .channel('ready_page_orders_realtime')
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'orders' },
@@ -75,8 +106,27 @@ export const ReadyOrdersPage: React.FC = () => {
       )
       .subscribe();
 
+    const deliveriesChannel = supabase
+      .channel('ready_page_deliveries_realtime')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'deliveries' },
+        () => loadReadyOrders(true)
+      )
+      .subscribe();
+
+    // Realtime listener for in-app rider assignment events across pages/tabs
+    const handleRiderChange = () => {
+      loadReadyOrders(true);
+    };
+    window.addEventListener('rider_assigned', handleRiderChange);
+    window.addEventListener('storage', handleRiderChange);
+
     return () => {
-      supabase.removeChannel(channel);
+      supabase.removeChannel(ordersChannel);
+      supabase.removeChannel(deliveriesChannel);
+      window.removeEventListener('rider_assigned', handleRiderChange);
+      window.removeEventListener('storage', handleRiderChange);
     };
   }, [loadReadyOrders]);
 
@@ -87,253 +137,252 @@ export const ReadyOrdersPage: React.FC = () => {
   ) => {
     if (!assigningOrder) return;
     try {
-      await assignDeliveryPartner(assigningOrder.id, partnerId, estimatedMinutes, notes);
-      await updateOrderStatus(assigningOrder.id, 'shipped');
-      setOrders((prev) => prev.filter((o) => o.id !== assigningOrder.id));
+      const newDelivery = await assignDeliveryPartner(
+        assigningOrder.id,
+        partnerId,
+        estimatedMinutes,
+        notes
+      );
+
+      setDeliveries((prev) => ({
+        ...prev,
+        [assigningOrder.id]: newDelivery,
+      }));
+
       setAssigningOrder(null);
+      // Reload quietly to reflect any database updates
+      loadReadyOrders(true);
     } catch (err: any) {
-      alert(err.message || 'Failed to assign rider and dispatch');
+      alert(err.message || 'Failed to assign rider');
     }
   };
 
-  const handleDirectDispatch = async (orderId: string) => {
-    if (!window.confirm('Dispatch this order for delivery directly?')) return;
-    setDirectDispatchingId(orderId);
-    try {
-      await updateOrderStatus(orderId, 'shipped');
-      setOrders((prev) => prev.filter((o) => o.id !== orderId));
-    } catch (err: any) {
-      alert(err.message || 'Failed to dispatch order');
-    } finally {
-      setDirectDispatchingId(null);
-    }
-  };
+  // Filter strictly only active orders where a delivery rider is assigned
+  const riderAssignedOrders = orders.filter((order) => {
+    if (order.status === 'delivered' || order.status === 'cancelled') return false;
 
-  const handleDeleteOrder = async (orderId: string) => {
-    if (!window.confirm(`Permanently delete order #${formatShortId(orderId)} from database? This will completely remove it from user history.`)) {
-      return;
-    }
-    setDirectDispatchingId(orderId);
-    try {
-      await deleteOrder(orderId);
-      setOrders((prev) => prev.filter((o) => o.id !== orderId));
-    } catch (err: any) {
-      alert(err.message || 'Failed to delete order.');
-    } finally {
-      setDirectDispatchingId(null);
-    }
-  };
+    const del = deliveries[order.id] || order.delivery;
+    if (del?.status === 'delivered' || del?.status === 'returned') return false;
 
-  const filteredOrders = orders.filter((o) => {
-    if (!searchQuery.trim()) return true;
-    const term = searchQuery.toLowerCase();
-    return (
-      o.recipient_name?.toLowerCase().includes(term) ||
-      o.recipient_phone?.includes(term) ||
-      o.id.toLowerCase().includes(term) ||
-      o.city?.toLowerCase().includes(term) ||
-      o.pincode?.includes(term)
+    return Boolean(
+      del?.delivery_partner_id ||
+      del?.delivery_partner ||
+      order.delivery?.delivery_partner_id ||
+      order.delivery?.delivery_partner ||
+      (order as any).rider_id ||
+      (order as any).rider_name
     );
   });
 
   return (
-    <div className="space-y-5">
-      {/* Top Header Card */}
-      <div
-        id="ready-orders-header"
-        className="bg-white rounded-xl border border-slate-200/80 p-4 sm:p-5 shadow-xs transition-all"
-      >
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
-              Ready Orders
-            </h1>
-            <span className="px-2.5 py-0.5 rounded-md text-xs font-semibold bg-cyan-50 text-cyan-800 border border-cyan-200">
-              {orders.length} ready for dispatch
-            </span>
+    <div className="space-y-4">
+      {/* Error Alert */}
+      {error && (
+        <div className="p-3.5 bg-rose-50 border border-rose-200 text-rose-800 text-xs sm:text-sm rounded-xl flex items-start gap-2.5">
+          <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <span className="font-semibold">Error: </span>
+            {error}
           </div>
-
-          <div className="flex items-center gap-2.5 flex-wrap self-start md:self-center">
-            <button
-              id="btn-refresh-ready"
-              type="button"
-              onClick={() => loadReadyOrders(true)}
-              disabled={refreshing || loading}
-              className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg transition cursor-pointer"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} />
-              <span>Refresh</span>
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={() => loadReadyOrders(false)}
+            className="text-xs font-semibold underline text-rose-900 hover:text-rose-700 cursor-pointer"
+          >
+            Retry
+          </button>
         </div>
-      </div>
+      )}
 
-      {/* Filter / Search Bar */}
-      <div className="bg-white rounded-xl border border-slate-200 p-3 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-3">
-        <div className="relative w-full sm:w-80">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-          <input
-            id="input-search-ready"
-            type="text"
-            placeholder="Search staged orders..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-600 focus:bg-white transition"
-          />
-        </div>
-
-        <div className="text-xs text-slate-500 font-mono-code">
-          Showing {filteredOrders.length} of {orders.length} ready parcels
-        </div>
-      </div>
-
-      {/* Content Grid */}
+      {/* Orders Grid / Status States */}
       {loading ? (
         <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center">
-          <RefreshCw className="w-8 h-8 text-cyan-600 animate-spin mx-auto mb-3" />
-          <p className="text-sm font-semibold text-slate-700">Loading staged parcels...</p>
+          <RefreshCw className="w-8 h-8 text-amber-500 animate-spin mx-auto mb-3" />
+          <p className="text-sm font-semibold text-slate-700">Loading rider queue...</p>
         </div>
-      ) : filteredOrders.length === 0 ? (
+      ) : riderAssignedOrders.length === 0 ? (
         <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center space-y-3">
-          <div className="w-12 h-12 rounded-full bg-cyan-50 border border-cyan-200 flex items-center justify-center mx-auto text-cyan-600">
-            <CheckCircle2 className="w-6 h-6" />
+          <div className="w-12 h-12 rounded-full bg-purple-50 border border-purple-200 flex items-center justify-center mx-auto text-purple-600">
+            <Bike className="w-6 h-6" />
           </div>
-          <h3 className="text-base font-bold text-slate-900">Dispatch Bay Empty</h3>
+          <h3 className="text-base font-bold text-slate-900">No orders with assigned riders</h3>
           <p className="text-xs sm:text-sm text-slate-500 max-w-md mx-auto">
-            {searchQuery
-              ? 'No ready orders match your search criteria.'
-              : 'All packed orders have been dispatched to riders.'}
+            Only orders with an assigned delivery partner appear here. Assign a rider during order packing to help them reach the warehouse early.
           </p>
-          <Link
-            to="/orders/packing"
-            className="inline-flex items-center gap-1.5 px-4 py-2 bg-slate-900 text-white font-semibold text-xs rounded-xl shadow-xs hover:bg-slate-800 transition"
-          >
-            Check Packing Queue →
-          </Link>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {filteredOrders.map((order) => {
-            const isDispatching = directDispatchingId === order.id;
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3.5 sm:gap-4">
+          {riderAssignedOrders.map((order) => {
             const items = order.order_items || [];
+            const isPaid = ['paid', 'completed', 'success'].includes(
+              (order.payment_status || '').toLowerCase()
+            );
+            const delivery = deliveries[order.id] || order.delivery;
+            const assignedRider = delivery?.delivery_partner || (order as any).rider;
 
             return (
               <div
                 key={order.id}
-                id={`ready-card-${order.id}`}
-                className="bg-white rounded-2xl border border-slate-200 hover:border-cyan-400 p-4 flex flex-col justify-between shadow-xs transition-all duration-150"
+                id={`rider-card-${order.id}`}
+                onClick={() => navigate(`/orders/${order.id}`)}
+                className="bg-white rounded-xl border border-slate-200 hover:border-slate-300 transition-all duration-150 p-3 sm:p-3.5 flex flex-col justify-between shadow-2xs hover:shadow-xs group cursor-pointer"
               >
-                <div className="space-y-3">
-                  {/* Card Header */}
-                  <div className="flex items-start justify-between gap-2 pb-2.5 border-b border-slate-100">
-                    <div>
-                      <div className="flex items-center gap-2">
+                {/* Card Top & Middle Content */}
+                <div className="space-y-2.5">
+                  {/* Card Header: Order ID, Date/Time & Elapsed on left; Price & Paid badge on right */}
+                  <div className="flex items-start justify-between gap-2 pb-2 border-b border-slate-100">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5 flex-wrap">
                         <Link
                           to={`/orders/${order.id}`}
-                          className="font-mono-code font-bold text-xs text-slate-900 hover:text-cyan-700 transition"
+                          onClick={(e) => e.stopPropagation()}
+                          className="font-mono-code font-bold text-xs text-slate-900 hover:text-amber-600 transition"
                         >
                           #{formatShortId(order.id)}
                         </Link>
-                        <span className="px-1.5 py-0.2 bg-cyan-50 text-cyan-900 text-[10px] font-bold rounded font-mono-code uppercase border border-cyan-200">
-                          Packed & Ready
-                        </span>
                       </div>
-                      <span className="text-[11px] text-slate-500 font-mono-code flex items-center gap-1 mt-0.5">
-                        <Clock className="w-3 h-3 text-cyan-600" />
-                        Packed: {order.packed_at ? formatDateTime(order.packed_at) : 'Recently'}
-                      </span>
+
+                      {/* Date & Time beside Elapsed Time */}
+                      <div className="flex items-center gap-1.5 flex-wrap text-[10.5px] text-slate-500 font-mono-code mt-0.5">
+                        <span className="flex items-center gap-1 font-medium text-amber-700">
+                          <Clock className="w-3 h-3 text-amber-500 shrink-0" />
+                          {order.placed_at ? formatTimeElapsed(order.placed_at) : 'Just now'}
+                        </span>
+                        {order.placed_at && (
+                          <>
+                            <span className="text-slate-300">•</span>
+                            <span className="text-slate-600">{formatDateTime(order.placed_at)}</span>
+                          </>
+                        )}
+                      </div>
                     </div>
 
-                    <div className="text-right">
+                    <div className="text-right shrink-0">
                       <div className="text-sm font-bold text-slate-900">
                         {formatCurrency(order.total_amount)}
                       </div>
-                      <span className="text-[10px] font-mono-code uppercase px-1.5 py-0.2 rounded bg-slate-100 text-slate-600 font-medium">
-                        {order.payment_method || 'COD'}
-                      </span>
+                      <div className="mt-0.5">
+                        {isPaid ? (
+                          <span
+                            className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded-full text-[10px] font-bold tracking-wider uppercase bg-emerald-500/15 text-emerald-800 border border-emerald-400/40"
+                            title="Payment verified"
+                          >
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                            Paid
+                          </span>
+                        ) : (
+                          <span
+                            className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded-full text-[10px] font-bold tracking-wider uppercase bg-amber-500/15 text-amber-900 border border-amber-400/40"
+                            title="Payment pending"
+                          >
+                            <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                            Unpaid
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
 
-                  {/* Destination Details */}
-                  <div className="space-y-1.5 text-xs bg-slate-50 p-3 rounded-xl border border-slate-100">
-                    <div className="flex items-center justify-between font-bold text-slate-900">
-                      <span className="truncate">{order.recipient_name}</span>
+                  {/* Customer Info */}
+                  <div className="space-y-1 text-xs">
+                    <div className="flex items-center gap-1.5 font-bold text-slate-900">
+                      <User className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                      <span className="truncate">{order.recipient_name || 'Customer'}</span>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 text-slate-600 font-mono-code text-[11px]">
+                      <Phone className="w-3 h-3 text-slate-400 shrink-0" />
                       <a
                         href={`tel:${order.recipient_phone}`}
-                        className="text-[11px] font-mono-code text-cyan-700 hover:underline flex items-center gap-1"
+                        onClick={(e) => e.stopPropagation()}
+                        className="hover:underline hover:text-slate-900"
                       >
-                        <Phone className="w-3 h-3" />
-                        {order.recipient_phone}
+                        {order.recipient_phone || 'N/A'}
                       </a>
                     </div>
 
-                    <div className="flex items-start gap-1.5 text-slate-600 text-[11px]">
-                      <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0 mt-0.5" />
+                    <div className="flex items-start gap-1.5 text-slate-500 text-[11px]">
+                      <MapPin className="w-3 h-3 text-slate-400 shrink-0 mt-0.5" />
                       <span className="line-clamp-2">
-                        {order.address_line1}, {order.city} - {order.pincode}
+                        {[order.address_line1, order.city, order.pincode].filter(Boolean).join(', ')}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Order Items Preview */}
+                  <div className="bg-slate-50 rounded-lg p-2 space-y-1 border border-slate-100">
+                    <div className="flex items-center justify-between text-[11px] font-semibold text-slate-700">
+                      <span className="flex items-center gap-1">
+                        <ShoppingBag className="w-3 h-3 text-slate-400" />
+                        Items ({order.item_count || items.length || 1})
                       </span>
                     </div>
 
-                    {order.delivery_notes && (
-                      <div className="text-[10px] text-amber-800 bg-amber-50 p-1.5 rounded border border-amber-200">
-                        <strong>Note:</strong> {order.delivery_notes}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Items summary */}
-                  <div className="text-xs text-slate-600 flex items-center justify-between px-1">
-                    <span className="text-slate-500 font-mono-code text-[11px]">
-                      {order.item_count || items.length} item(s) sealed
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setSelectedOrderForSlip(order)}
-                      className="text-cyan-700 hover:text-cyan-800 font-semibold text-[11px] flex items-center gap-1 cursor-pointer"
-                    >
-                      <Printer className="w-3 h-3" />
-                      Print Slip
-                    </button>
+                    <div className="space-y-1 max-h-20 overflow-y-auto custom-scrollbar pr-1">
+                      {items.length > 0 ? (
+                        items.map((it) => (
+                          <div key={it.id} className="flex items-center justify-between text-xs text-slate-600">
+                            <span className="truncate font-medium">
+                              {it.quantity}x {it.product_name}
+                            </span>
+                            <span className="font-mono-code text-[11px] text-slate-500 shrink-0 ml-2">
+                              {formatCurrency(it.price_at_purchase * it.quantity)}
+                            </span>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="text-[11px] text-slate-400 italic">No item breakdown available</div>
+                      )}
+                    </div>
                   </div>
                 </div>
 
-                {/* Card Action Buttons */}
-                <div className="mt-4 pt-3 border-t border-slate-100 flex items-center gap-2">
-                  <Link
-                    to={`/orders/${order.id}`}
-                    className="px-3 py-2 text-xs font-semibold text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-xl transition"
-                  >
-                    View
-                  </Link>
-
+                {/* Bottom Row: Liquid Glass Pill Buttons (Equal Length) */}
+                <div className="grid grid-cols-2 gap-2 w-full mt-2.5 pt-2.5 border-t border-slate-100">
+                  {/* Button 1: Packing / Ready to Deliver (Soft Cream Liquid Glass Pill) */}
                   <button
                     type="button"
-                    onClick={() => handleDeleteOrder(order.id)}
-                    disabled={isDispatching}
-                    title="Delete order permanently"
-                    className="p-2 text-rose-500 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 rounded-xl transition cursor-pointer disabled:opacity-50"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      navigate(`/orders/${order.id}`);
+                    }}
+                    title={`Order is ${order.status === 'packing' ? 'packing' : 'ready to deliver'} - click to view order`}
+                    className="relative overflow-hidden w-full h-8 sm:h-8.5 px-2.5 sm:px-3 rounded-full flex items-center justify-center gap-1.5 text-[11px] sm:text-xs font-semibold text-[#5A4934] bg-gradient-to-b from-[#FFFDF9]/95 via-[#FAF5EC]/95 to-[#EFE7D8]/95 border border-[#E5DAC8] shadow-[inset_0_1px_1px_rgba(255,255,255,0.9),0_2px_4px_rgba(140,110,80,0.08)] backdrop-blur-md hover:from-white hover:to-[#EAE0CF] active:scale-[0.98] transition-all cursor-pointer group/status"
                   >
-                    <Trash2 className="w-4 h-4" />
+                    {/* Liquid glass top specular reflection */}
+                    <span className="pointer-events-none absolute inset-x-0 top-0 h-[46%] bg-gradient-to-b from-white/70 via-white/20 to-transparent rounded-t-full" />
+
+                    {order.status === 'packing' ? (
+                      <>
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse shrink-0 shadow-[0_0_4px_rgba(245,158,11,0.6)]" />
+                        <span className="truncate">Packing</span>
+                      </>
+                    ) : (
+                      <>
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 shrink-0 shadow-[0_0_4px_rgba(16,185,129,0.5)]" />
+                        <span className="truncate">Ready to deliver</span>
+                      </>
+                    )}
                   </button>
 
+                  {/* Button 2: Rider Name (Red Liquid Glass Pill) */}
                   <button
                     type="button"
-                    onClick={() => handleDirectDispatch(order.id)}
-                    disabled={isDispatching}
-                    className="px-3 py-2 text-xs font-semibold text-slate-700 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-xl transition cursor-pointer disabled:opacity-50"
-                    title="Dispatch directly without rider assignment"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setAssigningOrder(order);
+                    }}
+                    title="Click to view or change assigned rider"
+                    className="relative overflow-hidden w-full h-8 sm:h-8.5 px-2.5 sm:px-3 rounded-full flex items-center justify-center gap-1.5 text-[11px] sm:text-xs font-semibold text-white bg-gradient-to-b from-red-500 via-red-600 to-red-700 border border-red-400/50 shadow-[inset_0_1px_1.5px_rgba(255,255,255,0.45),0_2px_5px_rgba(220,38,38,0.3)] backdrop-blur-md hover:from-red-400 hover:to-red-600 active:scale-[0.98] transition-all cursor-pointer group/rider"
                   >
-                    {isDispatching ? 'Dispatching...' : 'Self Deliver'}
-                  </button>
+                    {/* Liquid glass top specular reflection */}
+                    <span className="pointer-events-none absolute inset-x-0 top-0 h-[46%] bg-gradient-to-b from-white/40 via-white/10 to-transparent rounded-t-full" />
 
-                  <button
-                    type="button"
-                    onClick={() => setAssigningOrder(order)}
-                    className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2 bg-cyan-700 hover:bg-cyan-600 text-white font-bold text-xs rounded-xl shadow-xs transition cursor-pointer active:scale-98"
-                  >
-                    <UserPlus className="w-3.5 h-3.5" />
-                    <span>Assign Rider</span>
-                    <ArrowRight className="w-3.5 h-3.5 opacity-70" />
+                    <Bike className="w-3.5 h-3.5 text-white/95 shrink-0 drop-shadow-xs" />
+                    <span className="truncate drop-shadow-xs">
+                      {assignedRider?.name || (order as any).rider_name || 'Rider Assigned'}
+                    </span>
+                    <ChevronRight className="w-3 h-3 text-white/80 shrink-0 group-hover/rider:translate-x-0.5 transition-transform" />
                   </button>
                 </div>
               </div>
@@ -347,18 +396,10 @@ export const ReadyOrdersPage: React.FC = () => {
         <AssignPartnerModal
           isOpen={!!assigningOrder}
           orderId={assigningOrder.id}
-          currentPartnerId={assigningOrder.delivery?.delivery_partner_id}
+          currentPartnerId={deliveries[assigningOrder.id]?.delivery_partner_id}
           defaultNotes={assigningOrder.delivery_notes}
           onClose={() => setAssigningOrder(null)}
           onAssign={handlePartnerAssigned}
-        />
-      )}
-
-      {/* Packing Slip Modal */}
-      {selectedOrderForSlip && (
-        <PackingSlip
-          order={selectedOrderForSlip}
-          onClose={() => setSelectedOrderForSlip(null)}
         />
       )}
     </div>

@@ -1,7 +1,7 @@
 import { supabase } from '../lib/supabaseClient';
 import { withSkewRetry } from '../utils/supabaseHelper';
 import { Order, OrderItem, OrderStatus, OrderDashboardStats, OrderFilters } from '../types';
-import { fetchDeliveryByOrderId, logTrackingEvent } from './deliveryService';
+import { fetchDeliveryByOrderId, fetchRiderById, logTrackingEvent } from './deliveryService';
 
 /**
  * Centralized data service for managing Supabase order operations.
@@ -19,7 +19,9 @@ export async function fetchOrdersList(
       });
 
     // Apply status filter
-    if (filters?.status && filters.status !== 'all') {
+    if (filters?.statusIn && filters.statusIn.length > 0) {
+      query = query.in('status', filters.statusIn);
+    } else if (filters?.status && filters.status !== 'all') {
       query = query.eq('status', filters.status);
     }
 
@@ -107,10 +109,23 @@ export async function fetchOrdersList(
 
     if (error) {
       console.warn('[orderService] Error querying orders with join:', error);
-      const fallbackQuery = supabase
+      let fallbackQuery = supabase
         .from('orders')
-        .select('*', { count: 'exact' })
-        .order('placed_at', { ascending: false });
+        .select('*', { count: 'exact' });
+
+      if (filters?.statusIn && filters.statusIn.length > 0) {
+        fallbackQuery = fallbackQuery.in('status', filters.statusIn);
+      } else if (filters?.status && filters.status !== 'all') {
+        fallbackQuery = fallbackQuery.eq('status', filters.status);
+      }
+
+      fallbackQuery = fallbackQuery.order('placed_at', { ascending: false });
+
+      if (filters?.page && filters?.pageSize) {
+        const from = (filters.page - 1) * filters.pageSize;
+        const to = from + filters.pageSize - 1;
+        fallbackQuery = fallbackQuery.range(from, to);
+      }
 
       const { data: fallbackData, count: fallbackCount, error: fallbackErr } = await withSkewRetry(
         () => fallbackQuery,
@@ -141,7 +156,46 @@ export async function fetchOrdersList(
     // Augment with delivery details asynchronously
     const augmentedOrders = await Promise.all(
       orderList.map(async (order) => {
-        const delivery = await fetchDeliveryByOrderId(order.id);
+        let delivery = await fetchDeliveryByOrderId(order.id);
+        if (
+          !delivery?.delivery_partner &&
+          ((order as any).rider_id ||
+            (order as any).delivery_partner_id ||
+            (order as any).rider_name)
+        ) {
+          const riderId = (order as any).delivery_partner_id || (order as any).rider_id;
+          const rider = riderId ? await fetchRiderById(riderId) : null;
+          if (rider || (order as any).rider_name) {
+            delivery = {
+              id: delivery?.id || `del-${order.id}`,
+              order_id: order.id,
+              delivery_partner_id: riderId || null,
+              delivery_partner:
+                rider ||
+                ((order as any).rider_name
+                  ? {
+                      id: riderId || `r-${order.id}`,
+                      name: (order as any).rider_name,
+                      phone: (order as any).rider_phone || '',
+                      vehicle_type: 'bike',
+                      vehicle_number: (order as any).rider_vehicle || '',
+                      is_active: true,
+                      rating: 5.0,
+                      total_completed: 0,
+                    }
+                  : null),
+              status:
+                delivery?.status ||
+                ((order.status === 'shipped'
+                  ? 'out_for_delivery'
+                  : order.status === 'delivered'
+                  ? 'delivered'
+                  : 'assigned') as any),
+              created_at: delivery?.created_at || order.placed_at,
+              updated_at: delivery?.updated_at || order.placed_at,
+            };
+          }
+        }
         return {
           ...order,
           delivery,
@@ -181,7 +235,46 @@ export async function fetchOrderById(orderId: string): Promise<{ order: Order; i
     }
 
     const items: OrderItem[] = itemsData || [];
-    const delivery = await fetchDeliveryByOrderId(orderId);
+    let delivery = await fetchDeliveryByOrderId(orderId);
+    if (
+      !delivery?.delivery_partner &&
+      ((orderData as any).rider_id ||
+        (orderData as any).delivery_partner_id ||
+        (orderData as any).rider_name)
+    ) {
+      const riderId = (orderData as any).delivery_partner_id || (orderData as any).rider_id;
+      const rider = riderId ? await fetchRiderById(riderId) : null;
+      if (rider || (orderData as any).rider_name) {
+        delivery = {
+          id: delivery?.id || `del-${orderData.id}`,
+          order_id: orderData.id,
+          delivery_partner_id: riderId || null,
+          delivery_partner:
+            rider ||
+            ((orderData as any).rider_name
+              ? {
+                  id: riderId || `r-${orderData.id}`,
+                  name: (orderData as any).rider_name,
+                  phone: (orderData as any).rider_phone || '',
+                  vehicle_type: 'bike',
+                  vehicle_number: (orderData as any).rider_vehicle || '',
+                  is_active: true,
+                  rating: 5.0,
+                  total_completed: 0,
+                }
+              : null),
+          status:
+            delivery?.status ||
+            ((orderData.status === 'shipped'
+              ? 'out_for_delivery'
+              : orderData.status === 'delivered'
+              ? 'delivered'
+              : 'assigned') as any),
+          created_at: delivery?.created_at || orderData.placed_at,
+          updated_at: delivery?.updated_at || orderData.placed_at,
+        };
+      }
+    }
 
     const fullOrder: Order = {
       ...orderData,

@@ -46,7 +46,7 @@ function saveLocalPartners(partners: DeliveryPartner[]) {
   }
 }
 
-function getLocalDeliveries(): Record<string, Delivery> {
+export function getLocalDeliveries(): Record<string, Delivery> {
   try {
     const raw = localStorage.getItem(LOCAL_STORAGE_DELIVERIES_KEY);
     if (raw) return JSON.parse(raw);
@@ -56,7 +56,7 @@ function getLocalDeliveries(): Record<string, Delivery> {
   return {};
 }
 
-function saveLocalDelivery(delivery: Delivery) {
+export function saveLocalDelivery(delivery: Delivery) {
   try {
     const all = getLocalDeliveries();
     all[delivery.order_id] = delivery;
@@ -64,6 +64,47 @@ function saveLocalDelivery(delivery: Delivery) {
   } catch (e) {
     console.warn('Error saving local delivery:', e);
   }
+}
+
+/**
+ * Fetch all assigned delivery records across both Supabase and localStorage
+ */
+export async function fetchAllAssignedDeliveries(): Promise<Record<string, Delivery>> {
+  const result: Record<string, Delivery> = {};
+
+  // 1. Get from localStorage first
+  const localMap = getLocalDeliveries();
+  Object.entries(localMap).forEach(([orderId, del]) => {
+    if (del && (del.delivery_partner_id || (del as any).rider_id)) {
+      result[orderId] = del;
+    }
+  });
+
+  // 2. Supplement and merge with Supabase deliveries
+  try {
+    const { data: dbDeliveries } = await supabase
+      .from('deliveries')
+      .select('*, delivery_partner:delivery_partners(*)')
+      .not('delivery_partner_id', 'is', null);
+
+    if (dbDeliveries && Array.isArray(dbDeliveries)) {
+      for (const d of dbDeliveries) {
+        if (d.order_id) {
+          result[d.order_id] = {
+            ...result[d.order_id],
+            ...d,
+            delivery_partner: d.delivery_partner
+              ? normalizeDeliveryPartner(d.delivery_partner)
+              : result[d.order_id]?.delivery_partner || null,
+          };
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[deliveryService] fetchAllAssignedDeliveries Supabase query:', e);
+  }
+
+  return result;
 }
 
 function getLocalEvents(orderId: string): DeliveryTrackingEvent[] {
@@ -87,9 +128,93 @@ function saveLocalEvent(event: DeliveryTrackingEvent) {
 }
 
 /**
- * Fetch all delivery partners
+ * Normalizes raw backend record from delivery_partners or riders table into clean DeliveryPartner
+ */
+export function normalizeDeliveryPartner(raw: any): DeliveryPartner {
+  if (!raw) {
+    return {
+      id: `dp-${Date.now()}`,
+      name: 'Rider',
+      phone: '',
+      vehicle_type: 'bike',
+      vehicle_number: '',
+      is_active: true,
+      rating: 5.0,
+      total_completed: 0,
+      created_at: new Date().toISOString(),
+    };
+  }
+
+  const id = String(raw.id || raw.rider_id || raw.partner_id || `dp-${Date.now()}`);
+  const name = String(raw.name || raw.rider_name || raw.full_name || raw.username || 'Rider');
+  const phone = String(raw.phone || raw.phone_number || raw.mobile || raw.contact_number || '');
+  const vehicle_type = (raw.vehicle_type || raw.vehicle || 'bike') as DeliveryPartner['vehicle_type'];
+  const vehicle_number = String(raw.vehicle_number || raw.vehicle_no || raw.plate_number || '');
+  const is_active = raw.is_active !== undefined ? Boolean(raw.is_active) : raw.status ? raw.status === 'active' || raw.status === 'online' : true;
+  const rating = typeof raw.rating === 'number' ? raw.rating : parseFloat(raw.rating) || 5.0;
+  const total_completed = Number(raw.total_completed ?? raw.deliveries_completed ?? raw.total_trips ?? raw.completed_orders ?? 0);
+  const current_active_orders = Number(raw.current_active_orders ?? raw.active_orders ?? 0);
+  const avatar_url = raw.avatar_url || raw.photo_url || raw.profile_picture || null;
+  const created_at = raw.created_at || raw.joined_at || null;
+
+  return {
+    id,
+    name,
+    phone,
+    vehicle_type,
+    vehicle_number,
+    is_active,
+    rating,
+    total_completed,
+    current_active_orders,
+    avatar_url,
+    created_at,
+  };
+}
+
+/**
+ * Fetch specific rider details from backend by ID
+ */
+export async function fetchRiderById(riderId: string): Promise<DeliveryPartner | null> {
+  if (!riderId) return null;
+
+  // 1. Check delivery_partners in backend
+  try {
+    const { data, error } = await supabase
+      .from('delivery_partners')
+      .select('*')
+      .eq('id', riderId)
+      .maybeSingle();
+
+    if (!error && data) {
+      return normalizeDeliveryPartner(data);
+    }
+  } catch {}
+
+  // 2. Check riders in backend
+  try {
+    const { data, error } = await supabase
+      .from('riders')
+      .select('*')
+      .eq('id', riderId)
+      .maybeSingle();
+
+    if (!error && data) {
+      return normalizeDeliveryPartner(data);
+    }
+  } catch {}
+
+  // 3. Check local partners cache
+  const local = getLocalPartners();
+  const found = local.find((p) => p.id === riderId);
+  return found || null;
+}
+
+/**
+ * Fetch all delivery partners / riders from backend
  */
 export async function fetchDeliveryPartners(): Promise<DeliveryPartner[]> {
+  // 1. Try delivery_partners in backend
   try {
     const { data, error } = await withSkewRetry(
       () => supabase.from('delivery_partners').select('*').order('name'),
@@ -97,14 +222,34 @@ export async function fetchDeliveryPartners(): Promise<DeliveryPartner[]> {
       400
     );
 
-    if (error || !data || data.length === 0) {
-      return getLocalPartners();
+    if (!error && data && data.length > 0) {
+      const normalized = data.map(normalizeDeliveryPartner);
+      saveLocalPartners(normalized);
+      return normalized;
     }
-
-    return data as DeliveryPartner[];
-  } catch {
-    return getLocalPartners();
+  } catch (err) {
+    console.warn('Backend delivery_partners query failed, checking riders table:', err);
   }
+
+  // 2. Try riders in backend (in case backend table is named riders)
+  try {
+    const { data: riderData, error: riderErr } = await withSkewRetry(
+      () => supabase.from('riders').select('*'),
+      2,
+      400
+    );
+
+    if (!riderErr && riderData && riderData.length > 0) {
+      const normalized = riderData.map(normalizeDeliveryPartner);
+      saveLocalPartners(normalized);
+      return normalized;
+    }
+  } catch (err) {
+    console.warn('Backend riders query failed:', err);
+  }
+
+  // 3. Fallback to local store
+  return getLocalPartners();
 }
 
 /**
@@ -201,35 +346,75 @@ export async function clearAllDeliveryPartners(): Promise<void> {
 }
 
 /**
- * Fetch delivery record for an order
+ * Fetch delivery record for an order and load rider details from backend
  */
 export async function fetchDeliveryByOrderId(orderId: string): Promise<Delivery | null> {
+  const localDeliveries = getLocalDeliveries();
+  const local = localDeliveries[orderId];
+
   try {
+    // 1. Attempt embedded join query first
     const { data, error } = await withSkewRetry(
       () =>
         supabase
           .from('deliveries')
           .select('*, delivery_partner:delivery_partners(*)')
           .eq('order_id', orderId)
-          .single(),
+          .maybeSingle(),
       2,
-      400
+      300
     );
 
     if (!error && data) {
-      return data as Delivery;
+      const delivery = data as Delivery;
+      if (delivery.delivery_partner) {
+        delivery.delivery_partner = normalizeDeliveryPartner(delivery.delivery_partner);
+      } else {
+        const partnerId = delivery.delivery_partner_id || (delivery as any).rider_id;
+        if (partnerId) {
+          const rider = await fetchRiderById(partnerId);
+          delivery.delivery_partner = rider;
+        } else if (local?.delivery_partner_id || local?.delivery_partner) {
+          delivery.delivery_partner_id = local.delivery_partner_id;
+          delivery.delivery_partner = local.delivery_partner;
+        }
+      }
+      return delivery;
+    }
+
+    // 2. Direct select on deliveries table if join or FK failed
+    const { data: rawDel, error: rawErr } = await withSkewRetry(
+      () =>
+        supabase
+          .from('deliveries')
+          .select('*')
+          .eq('order_id', orderId)
+          .maybeSingle(),
+      2,
+      300
+    );
+
+    if (!rawErr && rawDel) {
+      const delivery = rawDel as Delivery;
+      const partnerId = delivery.delivery_partner_id || (delivery as any).rider_id;
+      if (partnerId) {
+        const rider = await fetchRiderById(partnerId);
+        delivery.delivery_partner = rider;
+      } else if (local?.delivery_partner_id || local?.delivery_partner) {
+        delivery.delivery_partner_id = local.delivery_partner_id;
+        delivery.delivery_partner = local.delivery_partner;
+      }
+      return delivery;
     }
   } catch (e) {
-    // Fallback to local
+    console.warn('Backend delivery lookup error:', e);
   }
 
-  const localDeliveries = getLocalDeliveries();
-  const local = localDeliveries[orderId];
   if (local) {
-    // Attach partner if present
-    if (local.delivery_partner_id) {
-      const partners = getLocalPartners();
-      local.delivery_partner = partners.find((p) => p.id === local.delivery_partner_id) || null;
+    const partnerId = local.delivery_partner_id || (local as any).rider_id;
+    if (partnerId && !local.delivery_partner) {
+      const rider = await fetchRiderById(partnerId);
+      local.delivery_partner = rider;
     }
     return local;
   }
@@ -248,8 +433,9 @@ export async function assignDeliveryPartner(
 ): Promise<Delivery> {
   const nowIso = new Date().toISOString();
   const estimatedDeliveryAt = new Date(Date.now() + estimatedMinutes * 60000).toISOString();
-  const partners = await fetchDeliveryPartners();
-  const partner = partners.find((p) => p.id === partnerId);
+  
+  // Fetch rider details from backend
+  const partner = await fetchRiderById(partnerId);
 
   const deliveryData: Delivery = {
     id: `del-${orderId}`,
@@ -265,21 +451,62 @@ export async function assignDeliveryPartner(
   };
 
   try {
-    await supabase.from('deliveries').upsert({
-      id: deliveryData.id,
+    const dbPayload = {
       order_id: orderId,
       delivery_partner_id: partnerId,
       status: 'assigned',
-      assigned_at: nowIso,
       estimated_delivery_at: estimatedDeliveryAt,
-      delivery_notes: notes,
+      delivery_notes: notes || null,
       updated_at: nowIso,
-    });
+    };
+
+    // Check if record exists for this order
+    const { data: existing } = await supabase
+      .from('deliveries')
+      .select('id')
+      .eq('order_id', orderId)
+      .maybeSingle();
+
+    if (existing?.id) {
+      await supabase
+        .from('deliveries')
+        .update(dbPayload)
+        .eq('id', existing.id);
+      deliveryData.id = existing.id;
+    } else {
+      const { data: insData, error: insErr } = await supabase
+        .from('deliveries')
+        .insert({ id: deliveryData.id, ...dbPayload })
+        .select('id')
+        .maybeSingle();
+
+      if (insErr) {
+        // Fallback without explicit id
+        const { data: insData2 } = await supabase
+          .from('deliveries')
+          .insert(dbPayload)
+          .select('id')
+          .maybeSingle();
+        if (insData2?.id) deliveryData.id = insData2.id;
+      } else if (insData?.id) {
+        deliveryData.id = insData.id;
+      }
+    }
   } catch (e) {
     console.warn('Supabase delivery upsert fallback:', e);
   }
 
   saveLocalDelivery(deliveryData);
+
+  // Trigger instantaneous cross-component and cross-tab synchronization
+  try {
+    window.dispatchEvent(
+      new CustomEvent('rider_assigned', { detail: { orderId, partnerId, delivery: deliveryData } })
+    );
+    window.dispatchEvent(new Event('storage'));
+  } catch {
+    // Non-fatal
+  }
 
   // Add timeline tracking event
   await logTrackingEvent({
@@ -394,12 +621,8 @@ export async function updateDeliveryStatus(
       status: newDeliveryStatus,
       updated_at: nowIso,
     };
-    if (existing.picked_up_at) payload.picked_up_at = existing.picked_up_at;
-    if (existing.out_for_delivery_at) payload.out_for_delivery_at = existing.out_for_delivery_at;
     if (existing.delivered_at) payload.delivered_at = existing.delivered_at;
-    if (existing.proof_of_delivery) payload.proof_of_delivery = existing.proof_of_delivery;
-    if (existing.failure_reason) payload.failure_reason = existing.failure_reason;
-    if (existing.failure_action) payload.failure_action = existing.failure_action;
+    if (extra?.notes) payload.delivery_notes = extra.notes;
 
     await supabase.from('deliveries').update(payload).eq('order_id', orderId);
   } catch (e) {

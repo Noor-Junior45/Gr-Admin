@@ -55,34 +55,10 @@ export const ProductsStockPage: React.FC = () => {
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
 
   return (
-    <div className="space-y-5">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-4 rounded-xl border border-slate-200/80 shadow-xs">
-        <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight flex items-center gap-2">
-            <span>Products & Stock</span>
-            <span className="text-xs font-mono-code bg-slate-100 text-slate-700 px-2.5 py-0.5 rounded-md font-semibold">
-              {totalCount} items
-            </span>
-          </h1>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => loadProducts(true)}
-            disabled={refreshing}
-            className="flex items-center gap-1.5 px-3 py-2 bg-slate-50 hover:bg-slate-100 text-slate-700 text-xs font-medium rounded-lg border border-slate-200 transition cursor-pointer"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} />
-            <span>{refreshing ? 'Refreshing...' : 'Refresh'}</span>
-          </button>
-        </div>
-      </div>
-
-      {/* Filter and Search Bar */}
-      <div className="bg-white rounded-xl border border-slate-200 p-3 sm:p-4 shadow-xs flex flex-col sm:flex-row items-center gap-3">
-        <div className="relative flex-1 w-full">
+    <div className="space-y-4">
+      {/* Streamlined Search & Category Toolbar */}
+      <div className="bg-white rounded-xl border border-slate-200 p-2.5 sm:p-3 shadow-2xs flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
+        <div className="relative flex-1">
           <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
           <input
             type="text"
@@ -92,24 +68,40 @@ export const ProductsStockPage: React.FC = () => {
               setPage(1);
             }}
             placeholder="Search products by title, brand, or SKU..."
-            className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs sm:text-sm text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
+            className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs sm:text-sm text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition"
           />
         </div>
 
-        <select
-          value={category}
-          onChange={(e) => {
-            setCategory(e.target.value);
-            setPage(1);
-          }}
-          className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-700 font-medium cursor-pointer w-full sm:w-auto"
-        >
-          <option value="all">All Categories</option>
-          <option value="electrical">Electrical</option>
-          <option value="switches">Switches & Sockets</option>
-          <option value="wires">Wires & Cables</option>
-          <option value="lighting">Lighting & Fixtures</option>
-        </select>
+        <div className="flex items-center justify-between sm:justify-end gap-2 shrink-0">
+          <select
+            value={category}
+            onChange={(e) => {
+              setCategory(e.target.value);
+              setPage(1);
+            }}
+            className="px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-700 font-medium cursor-pointer"
+          >
+            <option value="all">All Categories</option>
+            <option value="electrical">Electrical</option>
+            <option value="switches">Switches & Sockets</option>
+            <option value="wires">Wires & Cables</option>
+            <option value="lighting">Lighting</option>
+          </select>
+
+          <span className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 font-mono-code">
+            {totalCount}
+          </span>
+
+          <button
+            type="button"
+            onClick={() => loadProducts(true)}
+            disabled={refreshing}
+            className="flex items-center justify-center p-2 bg-slate-50 hover:bg-slate-100 text-slate-700 text-xs rounded-lg border border-slate-200 transition active:scale-95 cursor-pointer"
+            title="Refresh"
+          >
+            <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin text-amber-600' : ''}`} />
+          </button>
+        </div>
       </div>
 
       {error && (

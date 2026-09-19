@@ -19,6 +19,12 @@ import { OrderDetailPage } from './pages/OrderDetailPage';
 import { DispatchBoardPage } from './pages/DispatchBoardPage';
 import { DeliveryPartnersPage } from './pages/DeliveryPartnersPage';
 import { ProductsStockPage } from './pages/ProductsStockPage';
+import { ProfilePage } from './pages/ProfilePage';
+import { SettingsPage } from './pages/SettingsPage';
+import { PrivacyPolicyPage } from './pages/PrivacyPolicyPage';
+import { TermsOfServicePage } from './pages/TermsOfServicePage';
+import { DeleteAccountPolicyPage } from './pages/DeleteAccountPolicyPage';
+import { RefundPolicyPage } from './pages/RefundPolicyPage';
 
 export default function App() {
   return (
@@ -42,7 +48,7 @@ export default function App() {
               }
             />
 
-            {/* 2. All Orders Master Registry */}
+            {/* 2. Pending Orders Queue (Master) */}
             <Route
               path="/orders"
               element={
@@ -54,20 +60,14 @@ export default function App() {
               }
             />
 
-            {/* 3. Stage 1: Pending Review */}
+            {/* 3. Stage 1: Pending Review (Merged into /orders) */}
             <Route
               path="/pending"
-              element={
-                <ProtectedRoute>
-                  <AdminLayout>
-                    <PendingOrdersPage />
-                  </AdminLayout>
-                </ProtectedRoute>
-              }
+              element={<Navigate to="/orders" replace />}
             />
             <Route
               path="/orders/pending"
-              element={<Navigate to="/pending" replace />}
+              element={<Navigate to="/orders" replace />}
             />
 
             {/* 4. Stage 2: Packing Queue */}
@@ -202,6 +202,66 @@ export default function App() {
                   <AdminLayout>
                     <ProductsStockPage />
                   </AdminLayout>
+                </ProtectedRoute>
+              }
+            />
+
+            {/* 13. Operator Profile & Account (Matching reference image) */}
+            <Route
+              path="/profile"
+              element={
+                <ProtectedRoute>
+                  <ProfilePage />
+                </ProtectedRoute>
+              }
+            />
+
+            {/* 14. Settings (Sound, Popups, Operational Preferences) */}
+            <Route
+              path="/settings"
+              element={
+                <ProtectedRoute>
+                  <SettingsPage />
+                </ProtectedRoute>
+              }
+            />
+
+            {/* 15. Privacy Policy */}
+            <Route
+              path="/privacy-policy"
+              element={
+                <ProtectedRoute>
+                  <PrivacyPolicyPage />
+                </ProtectedRoute>
+              }
+            />
+
+            {/* 16. Terms of Service */}
+            <Route
+              path="/terms-of-service"
+              element={
+                <ProtectedRoute>
+                  <TermsOfServicePage />
+                </ProtectedRoute>
+              }
+            />
+
+            {/* 17. Delete Account Policy (Play Store Compliant) */}
+            <Route
+              path="/delete-account-policy"
+              element={
+                <ProtectedRoute>
+                  <DeleteAccountPolicyPage />
+                </ProtectedRoute>
+              }
+            />
+
+            {/* 18. Refund Policy */}
+            <Route
+              path="/refund-policy"
+              element={
+                <ProtectedRoute>
+                  <RefundPolicyPage />
                 </ProtectedRoute>
               }
             />

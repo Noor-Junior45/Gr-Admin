@@ -23,7 +23,6 @@ export interface OrderStatusStepperProps {
   onTransitionStatus: (targetStatus: OrderStatus) => Promise<void> | void;
   onRequestCancel: () => void;
   onRequestAssignRider?: () => void;
-  onRequestPod?: () => void;
   isUpdating?: boolean;
 }
 
@@ -86,9 +85,7 @@ const STEP_DEFINITIONS: StepDefinition[] = [
     shortLabel: 'Dispatched',
     stepNumber: 3,
     icon: Truck,
-    description: 'Out for delivery with assigned rider',
-    nextStatus: 'delivered',
-    nextActionLabel: 'Confirm Delivered (POD)',
+    description: 'Out for delivery with assigned rider (completed via rider app)',
     getTimestamp: (order) => order.shipped_at,
     activeBg: 'bg-sky-600',
     activeText: 'text-white',

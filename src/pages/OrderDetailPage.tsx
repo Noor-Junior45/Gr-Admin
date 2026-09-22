@@ -1,104 +1,82 @@
-import React, { useEffect, useState, useMemo } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import React, { useEffect, useState, useRef } from 'react';
+import { useParams, Link } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
-import { useAuth } from '../context/AuthContext';
-import { Order, OrderItem, OrderStatus, Delivery, DeliveryTrackingEvent } from '../types';
-import {
-  fetchOrderById,
-  updateOrderStatus,
-  cancelOrderRPC,
-  markRefundCompletedRPC,
-  deleteOrder,
-} from '../services/orderService';
+import { Order, OrderItem, Delivery } from '../types';
+import { fetchOrderById, updateOrderStatus } from '../services/orderService';
 import {
   fetchDeliveryByOrderId,
-  fetchTrackingEvents,
-  assignDeliveryPartner,
-  updateDeliveryStatus,
+  autoAssignNearestDeliveryPartner,
 } from '../services/deliveryService';
-import { OrderStatusStepper } from '../components/OrderStatusStepper';
 import { PackingSlip } from '../components/PackingSlip';
-import { CustomerTrackingTimeline } from '../components/CustomerTrackingTimeline';
-import { AssignPartnerModal } from '../components/AssignPartnerModal';
-import { FailedDeliveryModal } from '../components/FailedDeliveryModal';
-import {
-  formatCurrency,
-  formatDateTime,
-  formatShortId,
-  getStatusConfig,
-  getPaymentBadge,
-  getRefundBadge,
-} from '../utils/formatters';
+import { formatCurrency, formatDateTime, formatShortId } from '../utils/formatters';
 import {
   ArrowLeft,
-  Phone,
-  MapPin,
-  Printer,
-  CheckSquare,
-  Square,
-  Clock,
-  Box,
-  CheckCircle2,
-  Truck,
-  Sparkles,
-  XCircle,
-  AlertCircle,
-  Loader2,
-  Calendar,
-  CreditCard,
   FileText,
-  Tag,
-  PackageCheck,
-  RefreshCw,
-  ShoppingBag,
-  Copy,
+  CheckCircle2,
+  Bike,
+  MapPin,
   Check,
-  ExternalLink,
-  Info,
-  UserPlus,
-  ShieldCheck,
-  AlertTriangle,
-  RotateCcw,
-  BadgePercent,
-  CheckCheck,
-  Trash2,
+  X,
+  Loader2,
+  AlertCircle,
+  RefreshCw,
 } from 'lucide-react';
 
 export const OrderDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
-  const { isAdmin } = useAuth();
 
   const [order, setOrder] = useState<Order | null>(null);
   const [items, setItems] = useState<OrderItem[]>([]);
   const [delivery, setDelivery] = useState<Delivery | null>(null);
-  const [trackingEvents, setTrackingEvents] = useState<DeliveryTrackingEvent[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [updating, setUpdating] = useState<boolean>(false);
-  const [processingRefund, setProcessingRefund] = useState<boolean>(false);
+  const [assigningRider, setAssigningRider] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
-  const [auditBanner, setAuditBanner] = useState<{
-    type: 'success' | 'error';
-    message: string;
-    timestamp: string;
-  } | null>(null);
 
-  // Packing checklist state (client-side interactive helper)
-  const [checkedItems, setCheckedItems] = useState<Record<string, boolean>>({});
+  // Camera Popup State
+  const [isCameraOpen, setIsCameraOpen] = useState<boolean>(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const [scanningItem, setScanningItem] = useState<OrderItem | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
 
-  // Copy feedback state
-  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  // Item Checklist State (square tick box beside product image)
+  const [checkedItemIds, setCheckedItemIds] = useState<Record<string, boolean>>(() => {
+    try {
+      const saved = localStorage.getItem(`gr_order_${id}_checked_items`);
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
 
-  // Modals state
-  const [showCancelModal, setShowCancelModal] = useState<boolean>(false);
-  const [cancelReason, setCancelReason] = useState<string>('Customer Request');
-  const [customCancelReason, setCustomCancelReason] = useState<string>('');
-  const [cancelModalError, setCancelModalError] = useState<string | null>(null);
-  const [showDeleteModal, setShowDeleteModal] = useState<boolean>(false);
-  const [deleting, setDeleting] = useState<boolean>(false);
-  const [deleteModalError, setDeleteModalError] = useState<string | null>(null);
-  const [showAssignModal, setShowAssignModal] = useState<boolean>(false);
-  const [showFailedModal, setShowFailedModal] = useState<boolean>(false);
+  const toggleItemCheck = (itemId: string) => {
+    setCheckedItemIds((prev) => {
+      const next = { ...prev, [itemId]: !prev[itemId] };
+      try {
+        if (id) {
+          localStorage.setItem(`gr_order_${id}_checked_items`, JSON.stringify(next));
+        }
+      } catch (e) {
+        console.warn('Failed to persist checklist state:', e);
+      }
+      return next;
+    });
+  };
+
+  const markItemChecked = (itemId: string) => {
+    setCheckedItemIds((prev) => {
+      const next = { ...prev, [itemId]: true };
+      try {
+        if (id) {
+          localStorage.setItem(`gr_order_${id}_checked_items`, JSON.stringify(next));
+        }
+      } catch (e) {
+        console.warn('Failed to persist checklist state:', e);
+      }
+      return next;
+    });
+  };
 
   const loadDetails = async () => {
     if (!id) return;
@@ -106,178 +84,30 @@ export const OrderDetailPage: React.FC = () => {
     setError(null);
 
     try {
-      const [orderData, deliveryData, eventsData] = await Promise.all([
+      const [orderData, deliveryData] = await Promise.all([
         fetchOrderById(id),
         fetchDeliveryByOrderId(id),
-        fetchTrackingEvents(id),
       ]);
       setOrder(orderData.order);
       setItems(orderData.items);
       setDelivery(deliveryData);
-      setTrackingEvents(eventsData);
     } catch (err: any) {
       console.error('Error fetching order details:', err);
-      setError(err.message || 'Failed to load order information.');
+      setError(err?.message || 'Failed to load order information.');
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handleAssignPartner = async (partnerId: string, estimatedMinutes: number, notes?: string) => {
-    if (!id) return;
-    setUpdating(true);
-    try {
-      const updatedDelivery = await assignDeliveryPartner(id, partnerId, estimatedMinutes, notes);
-      setDelivery(updatedDelivery);
-      const events = await fetchTrackingEvents(id);
-      setTrackingEvents(events);
-      setAuditBanner({
-        type: 'success',
-        message: 'Delivery partner assigned and customer notified.',
-        timestamp: new Date().toLocaleTimeString('en-IN'),
-      });
-    } catch (err: any) {
-      alert(err.message || 'Failed to assign delivery partner');
-    } finally {
-      setUpdating(false);
-    }
-  };
-
-  const handleDeliveryStatusChange = async (nextStatus: any, extra?: any) => {
-    if (!id) return;
-    setUpdating(true);
-    try {
-      const updatedDelivery = await updateDeliveryStatus(id, nextStatus, extra);
-      setDelivery(updatedDelivery);
-      const events = await fetchTrackingEvents(id);
-      setTrackingEvents(events);
-
-      // Refresh order state
-      const refreshedOrder = await fetchOrderById(id);
-      setOrder(refreshedOrder.order);
-
-      setAuditBanner({
-        type: 'success',
-        message: `Delivery milestone updated to "${nextStatus.replace('_', ' ').toUpperCase()}".`,
-        timestamp: new Date().toLocaleTimeString('en-IN'),
-      });
-    } catch (err: any) {
-      alert(err.message || 'Failed to update delivery milestone');
-    } finally {
-      setUpdating(false);
-    }
-  };
-
-  const handleFailedSubmit = async (reason: string, action: any, notes?: string) => {
-    await handleDeliveryStatusChange('failed', { failureReason: reason, failureAction: action, notes });
-  };
-
-  /**
-   * Execute atomic order cancellation via supabase.rpc('cancel_order')
-   */
-  const handleConfirmCancellation = async () => {
-    if (!order || !id) return;
-    setUpdating(true);
-    setCancelModalError(null);
-
-    const finalReason =
-      cancelReason === 'Other'
-        ? customCancelReason.trim() || 'Other'
-        : customCancelReason.trim()
-        ? `${cancelReason} - ${customCancelReason.trim()}`
-        : cancelReason;
-
-    try {
-      await cancelOrderRPC(id, finalReason);
-      setShowCancelModal(false);
-      setCancelReason('Customer Request');
-      setCustomCancelReason('');
-
-      // Reload order details to refresh inventory & refund status
-      await loadDetails();
-
-      setAuditBanner({
-        type: 'success',
-        message: `Order cancelled and ${items.length} items restocked.`,
-        timestamp: new Date().toLocaleTimeString('en-IN'),
-      });
-    } catch (err: any) {
-      console.error('Error cancelling order via RPC:', err);
-      const msg = err.message || 'Failed to cancel order.';
-      setCancelModalError(msg);
-      setAuditBanner({
-        type: 'error',
-        message: msg,
-        timestamp: new Date().toLocaleTimeString('en-IN'),
-      });
-    } finally {
-      setUpdating(false);
-    }
-  };
-
-  /**
-   * Mark refund as completed via supabase.rpc('mark_refund_completed')
-   */
-  const handleMarkRefundCompleted = async () => {
-    if (!order || !id) return;
-    setProcessingRefund(true);
-    try {
-      await markRefundCompletedRPC(id);
-      await loadDetails();
-      setAuditBanner({
-        type: 'success',
-        message: 'Refund marked as completed.',
-        timestamp: new Date().toLocaleTimeString('en-IN'),
-      });
-    } catch (err: any) {
-      console.error('Error marking refund completed via RPC:', err);
-      setAuditBanner({
-        type: 'error',
-        message: err.message || 'Failed to mark refund completed.',
-        timestamp: new Date().toLocaleTimeString('en-IN'),
-      });
-    } finally {
-      setProcessingRefund(false);
-    }
-  };
-
-  /**
-   * Permanently delete order and associated records (deliveries, order items, tracking events)
-   * Removing it completely from user history and operational queues.
-   */
-  const handleConfirmDeleteOrder = async () => {
-    if (!id) return;
-    setDeleting(true);
-    setDeleteModalError(null);
-    try {
-      await deleteOrder(id);
-      navigate('/orders', { replace: true });
-    } catch (err: any) {
-      console.error('Error deleting order:', err);
-      setDeleteModalError(err.message || 'Failed to delete order from database.');
-    } finally {
-      setDeleting(false);
     }
   };
 
   useEffect(() => {
     loadDetails();
 
-    // Listen for realtime changes on this specific order
     const channel = supabase
-      .channel(`order_detail_${id}`)
+      .channel(`order_detail_view_${id}`)
       .on(
         'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'orders',
-          filter: `id=eq.${id}`,
-        },
-        (payload) => {
-          console.log('[OrderDetailPage] Live update received:', payload);
-          loadDetails();
-        }
+        { event: '*', schema: 'public', table: 'orders', filter: `id=eq.${id}` },
+        () => loadDetails()
       )
       .subscribe();
 
@@ -286,944 +116,588 @@ export const OrderDetailPage: React.FC = () => {
     };
   }, [id]);
 
-  const copyToClipboard = (text: string, key: string) => {
-    if (!text) return;
-    navigator.clipboard.writeText(text);
-    setCopiedKey(key);
-    setTimeout(() => setCopiedKey(null), 2000);
-  };
-
-  const handleToggleCheckItem = (itemId: string) => {
-    setCheckedItems((prev) => ({
-      ...prev,
-      [itemId]: !prev[itemId],
-    }));
-  };
-
-  // Status transition with optimistic rollback
-  const handleTransitionStatus = async (targetStatus: OrderStatus) => {
-    if (!order || !id) return;
-
-    const previousOrder = { ...order };
-    setUpdating(true);
-    setAuditBanner(null);
-
-    // Optimistic UI update
-    setOrder((prev) => (prev ? { ...prev, status: targetStatus } : null));
-
+  // Camera handling for SKU scan popup with checklist support
+  const openCamera = async (targetItem?: OrderItem) => {
+    setScanningItem(targetItem || null);
+    setCameraError(null);
+    setIsCameraOpen(true);
     try {
-      const updated = await updateOrderStatus(id, targetStatus);
-      setOrder((prev) => (prev ? { ...prev, ...updated } : updated));
-
-      setAuditBanner({
-        type: 'success',
-        message: `Order #${formatShortId(id)} status successfully transitioned to "${targetStatus.toUpperCase()}".`,
-        timestamp: new Date().toLocaleTimeString('en-IN'),
-      });
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: 'environment' } },
+        });
+        streamRef.current = stream;
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+        }
+      } else {
+        setCameraError('Camera access not supported on this browser.');
+      }
     } catch (err: any) {
-      console.error('Failed to transition order status:', err);
-      // Revert optimistic update
-      setOrder(previousOrder);
-      setAuditBanner({
-        type: 'error',
-        message: err.message || 'Database rejected status change. Reverted to previous state.',
-        timestamp: new Date().toLocaleTimeString('en-IN'),
-      });
-    } finally {
-      setUpdating(false);
-      setShowCancelModal(false);
+      console.error('Camera access error:', err);
+      setCameraError('Camera permission denied or camera not found.');
     }
   };
 
-  // Construct full delivery address
-  const fullAddress = useMemo(() => {
-    if (!order) return '';
-    const parts = [
-      order.address_line1,
-      order.address_line2,
-      order.city,
-      order.state,
-      order.pincode,
-    ].filter(Boolean);
-    return parts.join(', ');
-  }, [order]);
+  const closeCamera = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    }
+    setScanningItem(null);
+    setIsCameraOpen(false);
+  };
 
-  const googleMapsUrl = useMemo(() => {
-    if (!fullAddress) return '';
-    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(fullAddress)}`;
-  }, [fullAddress]);
+  // Automatic Barcode Detection when camera is open (for SKU checklist)
+  useEffect(() => {
+    if (!isCameraOpen) return;
+    let animId: number;
+    let detector: any = null;
 
-  const allItemsPacked = useMemo(() => {
-    if (items.length === 0) return true;
-    return items.every((it) => checkedItems[it.id]);
-  }, [items, checkedItems]);
+    if ('BarcodeDetector' in window) {
+      try {
+        detector = new (window as any).BarcodeDetector({
+          formats: ['qr_code', 'ean_13', 'ean_8', 'code_128', 'code_39', 'upc_a', 'upc_e'],
+        });
+      } catch {
+        detector = null;
+      }
+    }
 
-  const handlePrintPackingSlip = () => {
-    window.print();
+    const checkBarcode = async () => {
+      if (detector && videoRef.current && videoRef.current.readyState >= 2) {
+        try {
+          const barcodes = await detector.detect(videoRef.current);
+          if (barcodes && barcodes.length > 0 && scanningItem) {
+            markItemChecked(scanningItem.id);
+            closeCamera();
+            return;
+          }
+        } catch {
+          // Ignore frame decode errors
+        }
+      }
+      if (isCameraOpen) {
+        animId = requestAnimationFrame(checkBarcode);
+      }
+    };
+
+    if (detector) {
+      animId = requestAnimationFrame(checkBarcode);
+    }
+
+    return () => {
+      if (animId) cancelAnimationFrame(animId);
+    };
+  }, [isCameraOpen, scanningItem]);
+
+  useEffect(() => {
+    return () => {
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((t) => t.stop());
+      }
+    };
+  }, []);
+
+  // Confirm packing done
+  const handleConfirmPackingDone = async () => {
+    if (!order || !id) return;
+    const canConfirm = items.length === 0 || items.every((it) => Boolean(checkedItemIds[it.id]));
+    if (!canConfirm) {
+      alert('Please tick all order item checklist boxes before confirming packing.');
+      return;
+    }
+    setUpdating(true);
+    try {
+      const updated = await updateOrderStatus(id, 'packed');
+      setOrder((prev) =>
+        prev
+          ? {
+              ...prev,
+              ...updated,
+              status: 'packed',
+              packed_at: new Date().toISOString(),
+            }
+          : updated
+      );
+    } catch (err: any) {
+      alert(err?.message || 'Failed to confirm packing.');
+    } finally {
+      setUpdating(false);
+    }
+  };
+
+  // Auto assign nearest rider
+  const handleAutoAssignRider = async () => {
+    if (!id) return;
+    setAssigningRider(true);
+    try {
+      const res = await autoAssignNearestDeliveryPartner(id, 25);
+      if (res.success && res.delivery) {
+        setDelivery(res.delivery);
+      } else {
+        alert(res.message || 'Could not find an available rider to auto-assign.');
+      }
+    } catch (err: any) {
+      alert(err?.message || 'Failed to auto-assign rider.');
+    } finally {
+      setAssigningRider(false);
+    }
   };
 
   if (loading) {
     return (
-      <div className="p-12 text-center text-slate-500 space-y-3">
-        <Loader2 className="w-8 h-8 animate-spin mx-auto text-amber-500" />
-        <p className="text-sm font-medium">Loading order details from Supabase...</p>
+      <div className="max-w-md mx-auto py-12 px-4 text-center">
+        <Loader2 className="w-8 h-8 text-slate-400 animate-spin mx-auto mb-3" />
+        <p className="text-xs text-slate-500">Loading order details...</p>
       </div>
     );
   }
 
   if (error || !order) {
     return (
-      <div className="bg-white p-8 rounded-xl border border-slate-200 text-center space-y-4 max-w-lg mx-auto mt-8 shadow-xs">
-        <AlertCircle className="w-12 h-12 text-rose-500 mx-auto" />
-        <h2 className="text-lg font-bold text-slate-900">Order Not Found</h2>
-        <p className="text-xs text-slate-500">{error || 'Could not locate the requested order.'}</p>
+      <div className="max-w-md mx-auto py-10 px-4 text-center space-y-3">
+        <AlertCircle className="w-8 h-8 text-rose-500 mx-auto" />
+        <p className="text-sm font-semibold text-slate-800">{error || 'Order not found'}</p>
         <button
           type="button"
-          onClick={() => navigate('/orders')}
-          className="px-4 py-2 bg-slate-900 text-white text-xs font-semibold rounded-lg hover:bg-slate-800 transition cursor-pointer"
+          onClick={loadDetails}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-100 text-xs font-semibold text-slate-700 hover:bg-slate-200 cursor-pointer"
         >
-          Return to All Orders
+          <RefreshCw className="w-3.5 h-3.5" /> Retry
         </button>
       </div>
     );
   }
 
-  const statusCfg = getStatusConfig(order.status);
-  const payBadge = getPaymentBadge(order.payment_status);
+  const fullAddress = [
+    order.address_line1,
+    order.address_line2,
+    order.city,
+    order.state,
+    order.pincode,
+  ]
+    .filter(Boolean)
+    .join(', ');
+
+  const timelineSteps = [
+    {
+      title: 'Order Placed',
+      timestamp: order.placed_at,
+      completed: true,
+    },
+    {
+      title: 'Packing Done (Admin)',
+      timestamp:
+        order.packed_at ||
+        (['packed', 'shipped', 'delivered'].includes(order.status)
+          ? order.updated_at
+          : null),
+      completed: ['packed', 'shipped', 'delivered'].includes(order.status),
+    },
+    {
+      title: 'Rider Assigned',
+      timestamp:
+        delivery?.assigned_at ||
+        (delivery?.delivery_partner ? delivery.created_at : null),
+      completed: Boolean(delivery?.delivery_partner_id || delivery?.delivery_partner),
+    },
+    {
+      title: 'Dispatched / Out for Delivery',
+      timestamp:
+        delivery?.out_for_delivery_at ||
+        delivery?.picked_up_at ||
+        order.shipped_at,
+      completed:
+        ['shipped', 'delivered'].includes(order.status) ||
+        ['out_for_delivery', 'near_destination', 'delivered'].includes(
+          delivery?.status as any
+        ),
+    },
+    {
+      title: 'Delivery Done',
+      timestamp: delivery?.delivered_at || order.delivered_at,
+      completed: order.status === 'delivered' || delivery?.status === 'delivered',
+    },
+  ];
+
+  const isAlreadyPacked =
+    order.status === 'packed' ||
+    order.status === 'shipped' ||
+    order.status === 'delivered';
+
+  const allItemsChecked =
+    items.length > 0
+      ? items.every((it) => Boolean(checkedItemIds[it.id]))
+      : true;
 
   return (
-    <div className="space-y-5 pb-12">
-      {/* Hidden printable packing slip rendered exclusively during window.print() */}
-      <PackingSlip order={order} items={items} />
-
-      {/* Audit Banner Notification */}
-      {auditBanner && (
-        <div
-          className={`p-3.5 rounded-xl border text-xs sm:text-sm flex items-start justify-between gap-3 shadow-xs ${
-            auditBanner.type === 'success'
-              ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
-              : 'bg-rose-50 border-rose-200 text-rose-900'
-          }`}
-        >
-          <div className="flex items-start gap-2">
-            {auditBanner.type === 'success' ? (
-              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-            ) : (
-              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
-            )}
-            <div>
-              <span className="font-semibold">{auditBanner.message}</span>
-              <div className="text-[11px] opacity-75 font-mono-code mt-0.5">
-                Audit logged at {auditBanner.timestamp}
-              </div>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={() => setAuditBanner(null)}
-            className="text-xs font-bold opacity-60 hover:opacity-100 p-1 cursor-pointer"
+    <>
+      {/* Phone Screen Optimized, Unboxed Layout */}
+      <div className="max-w-md mx-auto py-2 sm:py-3 px-3.5 sm:px-4 text-slate-900 space-y-4 pb-20 font-sans">
+        {/* Simple Back Navigation */}
+        <div>
+          <Link
+            to="/orders"
+            className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-slate-800 transition"
           >
-            ✕
-          </button>
-        </div>
-      )}
-
-      {/* Navigation & Header Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={() => navigate(-1)}
-            className="p-2 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition cursor-pointer border border-slate-200"
-            title="Go Back"
-          >
-            <ArrowLeft className="w-4 h-4" />
-          </button>
-
-          <div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <h1 className="text-xl sm:text-2xl font-mono-code font-bold text-slate-900">
-                {formatShortId(order.id)}
-              </h1>
-              <button
-                type="button"
-                onClick={() => copyToClipboard(order.id, 'order_id')}
-                className="p-1 text-slate-400 hover:text-slate-700 rounded transition cursor-pointer"
-                title="Copy Full UUID"
-              >
-                {copiedKey === 'order_id' ? (
-                  <Check className="w-3.5 h-3.5 text-emerald-600" />
-                ) : (
-                  <Copy className="w-3.5 h-3.5" />
-                )}
-              </button>
-
-              <span
-                className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium border ${statusCfg.bg} ${statusCfg.text} ${statusCfg.border}`}
-              >
-                <span className={`w-1.5 h-1.5 rounded-full ${statusCfg.dotBg}`} />
-                {statusCfg.label}
-              </span>
-            </div>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Placed on {formatDateTime(order.placed_at)}
-            </p>
-          </div>
+            <ArrowLeft className="w-3.5 h-3.5" /> Back to Orders
+          </Link>
         </div>
 
-        {/* Top Actions: Cancel Order + Delete Order + Print Packing Slip + Refresh */}
-        <div className="flex items-center gap-2 flex-wrap">
-          {!['cancelled', 'delivered'].includes(order.status) && (
+        {/* 1. At top of page: Order id and in same line pdf button (no text), below shows date and time */}
+        <div className="border-b border-slate-200 pb-3">
+          <div className="flex items-center justify-between">
+            <h1 className="text-xl font-bold font-mono tracking-tight text-slate-900">
+              #{formatShortId(order.id)}
+            </h1>
             <button
-              id="btn-header-cancel-order"
               type="button"
-              onClick={() => {
-                setCancelModalError(null);
-                setShowCancelModal(true);
-              }}
-              disabled={updating || deleting}
-              className="flex items-center gap-1.5 px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-semibold rounded-lg border border-rose-200 shadow-2xs transition cursor-pointer disabled:opacity-50"
-              title="Cancel this order and restock inventory"
+              onClick={() => window.print()}
+              className="p-2 text-slate-600 hover:text-slate-900 active:scale-95 transition cursor-pointer"
+              title="Print PDF"
+              aria-label="PDF"
             >
-              <XCircle className="w-3.5 h-3.5 text-rose-600" />
-              <span>Cancel Order</span>
+              <FileText className="w-5 h-5" />
             </button>
+          </div>
+          <p className="text-xs text-slate-500 mt-0.5">
+            {formatDateTime(order.placed_at)}
+          </p>
+        </div>
+
+        {/* 2. Order Items Section: square checklist box beside image start, image, name, items colour, unit, price, and SKU button (opens camera) */}
+        <div className="space-y-3 border-b border-slate-200 pb-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+              Order Items ({items.length})
+            </h2>
+            {items.length > 0 && (
+              <span
+                className={`text-[11px] font-semibold px-2 py-0.5 rounded-full transition-colors ${
+                  items.every((it) => checkedItemIds[it.id])
+                    ? 'bg-emerald-100 text-emerald-800'
+                    : 'bg-slate-100 text-slate-600'
+                }`}
+              >
+                {items.filter((it) => checkedItemIds[it.id]).length}/{items.length} checked
+              </span>
+            )}
+          </div>
+
+          <div className="divide-y divide-slate-100">
+            {items.map((item) => {
+              const isChecked = Boolean(checkedItemIds[item.id]);
+
+              return (
+                <div key={item.id} className="flex items-start gap-2.5 py-3 first:pt-1">
+                  {/* Square type checklist box in left side, beside of products image start */}
+                  <div className="flex items-center shrink-0 gap-2.5">
+                    <button
+                      type="button"
+                      id={`checklist-box-${item.id}`}
+                      role="checkbox"
+                      aria-checked={isChecked}
+                      onClick={() => toggleItemCheck(item.id)}
+                      className={`w-5 h-5 rounded-[4px] border flex items-center justify-center cursor-pointer transition-all ${
+                        isChecked
+                          ? 'bg-emerald-600 border-emerald-600 text-white shadow-2xs'
+                          : 'bg-white border-slate-300 hover:border-slate-400 text-transparent'
+                      }`}
+                      title={isChecked ? 'Item checked (click to uncheck)' : 'Click to checklist item'}
+                      aria-label={`Checklist ${item.product_name}`}
+                    >
+                      <Check
+                        className={`w-3.5 h-3.5 stroke-[3] transition-all duration-150 ${
+                          isChecked ? 'scale-100 opacity-100' : 'scale-50 opacity-0'
+                        }`}
+                      />
+                    </button>
+
+                    <img
+                      src={
+                        item.product_image ||
+                        'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=120&auto=format&fit=crop&q=60'
+                      }
+                      alt={item.product_name}
+                      className="w-14 h-14 rounded-lg object-cover bg-slate-100 shrink-0"
+                    />
+                  </div>
+
+                  <div className="flex-1 min-w-0">
+                    <div className="font-semibold text-sm text-slate-900 leading-snug truncate">
+                      {item.product_name}
+                    </div>
+                    <div className="text-xs text-slate-500 mt-0.5">
+                      Colour: {(item as any).color || (item as any).variant || 'Standard'}
+                    </div>
+                    <div className="text-xs text-slate-500">
+                      Unit:{' '}
+                      {item.unit
+                        ? `${item.quantity} ${item.unit}`
+                        : `${item.quantity} unit${item.quantity > 1 ? 's' : ''}`}
+                    </div>
+                    <div className="text-xs font-bold text-slate-900 mt-1">
+                      {formatCurrency(item.price_at_purchase * item.quantity)}
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => openCamera(item)}
+                    className={`px-2.5 py-1 text-xs font-semibold rounded-md active:scale-95 transition cursor-pointer shrink-0 ${
+                      isChecked
+                        ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                        : 'bg-slate-100 hover:bg-slate-200 text-slate-800'
+                    }`}
+                    title="Open SKU scanner for this item"
+                  >
+                    {isChecked ? 'Checked' : 'SKU'}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* 3. Payment Section (Moved below order items, renamed to Payment) */}
+        <div className="space-y-2 border-b border-slate-200 pb-4">
+          <h2 className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+            Payment
+          </h2>
+          <div className="flex items-center justify-between text-xs py-0.5">
+            <span className="text-slate-500">Payment Method</span>
+            <span className="font-semibold text-slate-900 capitalize">
+              {order.payment_method || 'Cash on Delivery'}
+            </span>
+          </div>
+          <div className="flex items-center justify-between text-xs py-0.5">
+            <span className="text-slate-500">Sub Total</span>
+            <span className="font-mono text-slate-800">
+              {formatCurrency(order.subtotal || order.total_amount)}
+            </span>
+          </div>
+          <div className="flex items-center justify-between text-sm font-bold py-1 border-t border-slate-100">
+            <span className="text-slate-900">Total Charge</span>
+            <span className="font-mono text-slate-900">
+              {formatCurrency(order.total_amount)}
+            </span>
+          </div>
+        </div>
+
+        {/* 4. Confirm packing done button - grey theme and non-interactive until checklist items are ticked green */}
+        <div className="pb-1">
+          <button
+            type="button"
+            id="btn-confirm-packing-done"
+            onClick={handleConfirmPackingDone}
+            disabled={
+              updating ||
+              isAlreadyPacked ||
+              !allItemsChecked
+            }
+            aria-disabled={!allItemsChecked || isAlreadyPacked || updating}
+            className={`w-full py-3 px-4 rounded-xl text-sm font-bold transition flex items-center justify-center gap-2 ${
+              isAlreadyPacked
+                ? 'bg-emerald-600 text-white opacity-95 cursor-default'
+                : allItemsChecked
+                ? 'bg-blue-600 hover:bg-blue-700 active:scale-[0.99] text-white cursor-pointer shadow-sm'
+                : 'bg-slate-200 text-slate-400 border border-slate-300 cursor-not-allowed select-none'
+            }`}
+          >
+            {updating ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <CheckCircle2
+                className={`w-4 h-4 ${
+                  !isAlreadyPacked && !allItemsChecked ? 'text-slate-400' : ''
+                }`}
+              />
+            )}
+            <span>
+              {isAlreadyPacked
+                ? 'Packing Confirmed Done'
+                : 'Confirm packing done'}
+            </span>
+          </button>
+          {!isAlreadyPacked && !allItemsChecked && items.length > 0 && (
+            <p className="text-[11px] text-slate-400 text-center mt-1.5 font-medium">
+              Tick all order items above to enable packing confirmation
+            </p>
+          )}
+        </div>
+
+        {/* Space / gap between confirm packing done and delivery fleet button */}
+        <div className="pt-2 border-t border-slate-200" />
+
+        {/* 5. Delivery Fleet section (only one button to auto assign nearest rider) */}
+        <div className="space-y-2.5 border-b border-slate-200 pb-4">
+          <h2 className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+            Delivery Fleet
+          </h2>
+
+          {delivery?.delivery_partner && (
+            <div className="text-xs text-slate-700">
+              Rider: <span className="font-bold text-slate-900">{delivery.delivery_partner.name}</span>
+              {delivery.delivery_partner.phone && (
+                <span className="font-mono text-slate-500 ml-1">
+                  ({delivery.delivery_partner.phone})
+                </span>
+              )}
+            </div>
           )}
 
           <button
-            id="btn-header-delete-order"
             type="button"
-            onClick={() => {
-              setDeleteModalError(null);
-              setShowDeleteModal(true);
-            }}
-            disabled={updating || deleting}
-            className="flex items-center gap-1.5 px-3 py-2 bg-rose-50/80 hover:bg-rose-100 text-rose-700 hover:text-rose-800 text-xs font-semibold rounded-lg border border-rose-200 shadow-2xs transition cursor-pointer disabled:opacity-50"
-            title="Permanently delete order from user history and operational records"
+            onClick={handleAutoAssignRider}
+            disabled={assigningRider || updating}
+            className="w-full py-3 px-4 rounded-xl text-sm font-bold text-slate-900 bg-amber-400 hover:bg-amber-500 active:scale-[0.99] transition cursor-pointer flex items-center justify-center gap-2"
           >
-            <Trash2 className="w-3.5 h-3.5 text-rose-600" />
-            <span>Delete Order</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={handlePrintPackingSlip}
-            className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold rounded-lg shadow-xs transition cursor-pointer"
-            title="Print Official Warehouse Packing Slip"
-          >
-            <Printer className="w-3.5 h-3.5" />
-            <span>Print Packing Slip</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={loadDetails}
-            disabled={loading}
-            className="p-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg border border-slate-200 transition cursor-pointer"
-            title="Reload order state"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+            {assigningRider ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Bike className="w-4 h-4" />
+            )}
+            <span>Auto assign nearest rider</span>
           </button>
         </div>
-      </div>
 
-      {/* Visual Order Status Timeline Stepper Component */}
-      <OrderStatusStepper
-        order={order}
-        delivery={delivery}
-        onTransitionStatus={handleTransitionStatus}
-        onRequestCancel={() => {
-          setCancelModalError(null);
-          setShowCancelModal(true);
-        }}
-        onRequestAssignRider={() => setShowAssignModal(true)}
-        isUpdating={updating}
-      />
+        {/* 6. Customer details, delivery address, and open in google map button */}
+        <div className="space-y-2 border-b border-slate-200 pb-4">
+          <h2 className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+            Customer Details & Address
+          </h2>
+          <div className="text-sm font-bold text-slate-900">{order.recipient_name}</div>
+          <div className="text-xs text-slate-600 font-mono">
+            <a href={`tel:${order.recipient_phone}`} className="hover:underline">
+              {order.recipient_phone || 'No phone provided'}
+            </a>
+          </div>
+          <div className="text-xs text-slate-600 leading-relaxed break-words">
+            {fullAddress || 'No address provided'}
+          </div>
 
-      {/* Two Column Grid: Recipient/Address/Payment and Order Items Workspace */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-        {/* Left Column (1/3): Recipient, Shipping Address, Cancellation/Refund & Financials */}
-        <div className="space-y-5">
-          {/* Cancelled Order & Refund Tracking Card */}
-          {order.status === 'cancelled' && (
-            <div
-              id="cancellation-refund-card"
-              className="bg-white rounded-xl border border-rose-200 p-4 sm:p-5 shadow-xs space-y-4"
+          <div className="pt-1">
+            <a
+              href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+                fullAddress
+              )}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 py-1.5 px-3 rounded-lg text-xs font-semibold text-blue-600 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 transition active:scale-95"
             >
-              <div className="flex items-center justify-between border-b border-rose-100 pb-2.5">
-                <h2 className="text-xs font-bold uppercase font-mono-code text-rose-900 tracking-wider flex items-center gap-1.5">
-                  <XCircle className="w-3.5 h-3.5 text-rose-600" />
-                  <span>Cancellation & Refund</span>
-                </h2>
-                {order.refund_status && (
-                  <span
-                    className={`text-[10px] px-2 py-0.5 rounded-full font-bold border ${
-                      getRefundBadge(order.refund_status).pillBg
+              <MapPin className="w-3.5 h-3.5" />
+              <span>Open in Google Map</span>
+            </a>
+          </div>
+        </div>
+
+        {/* 7. Below payment: Delivery Timeline (checklist format with date & time) */}
+        <div className="space-y-3 pt-1">
+          <h2 className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+            Delivery Timeline
+          </h2>
+
+          <div className="space-y-3.5">
+            {timelineSteps.map((step, idx) => (
+              <div key={idx} className="flex items-start gap-2.5">
+                <div
+                  className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 mt-0.5 ${
+                    step.completed
+                      ? 'bg-emerald-500 text-white'
+                      : 'bg-slate-200 text-slate-400'
+                  }`}
+                >
+                  <Check className="w-3 h-3 stroke-[3]" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div
+                    className={`text-xs font-semibold leading-tight ${
+                      step.completed ? 'text-slate-900' : 'text-slate-400'
                     }`}
                   >
-                    {getRefundBadge(order.refund_status).label}
-                  </span>
-                )}
-              </div>
-
-              {/* Cancellation Details */}
-              <div className="space-y-2 text-xs">
-                <div className="flex justify-between text-slate-600">
-                  <span>Cancelled At</span>
-                  <span className="font-mono-code font-semibold text-slate-900">
-                    {formatDateTime(order.cancelled_at || order.updated_at)}
-                  </span>
-                </div>
-
-                <div className="flex justify-between text-slate-600">
-                  <span>Reason</span>
-                  <span className="font-medium text-slate-900 text-right max-w-[65%]">
-                    {order.cancel_reason || order.cancellation_reason || 'Not specified'}
-                  </span>
-                </div>
-
-                <div className="flex justify-between text-slate-600">
-                  <span>Stock Status</span>
-                  <span className="font-semibold text-emerald-700 flex items-center gap-1">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                    Restocked to Inventory
-                  </span>
-                </div>
-              </div>
-
-              {/* Refund Status Box */}
-              {order.refund_status === 'pending' && (
-                <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-xl space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-1.5 text-amber-900 font-bold text-xs">
-                      <AlertTriangle className="w-4 h-4 text-amber-600" />
-                      <span>Refund Pending</span>
-                    </div>
-                    <span className="font-mono-code font-bold text-amber-950 text-sm">
-                      {formatCurrency(order.total_amount)}
-                    </span>
+                    {step.title}
                   </div>
-
-                  <p className="text-[11px] text-amber-800 leading-relaxed">
-                    Customer was charged for this order. A manual refund of{' '}
-                    <strong className="font-mono-code">{formatCurrency(order.total_amount)}</strong>{' '}
-                    needs to be sent to their original payment method.
-                  </p>
-
-                  {isAdmin && (
-                    <div className="pt-2 border-t border-amber-200/80 space-y-1.5">
-                      <button
-                        id="btn-mark-refund-completed"
-                        type="button"
-                        onClick={handleMarkRefundCompleted}
-                        disabled={processingRefund}
-                        className="w-full py-2 px-3 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-lg shadow-xs transition cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50 active:scale-98"
-                      >
-                        {processingRefund ? (
-                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                        ) : (
-                          <CheckCheck className="w-3.5 h-3.5" />
-                        )}
-                        <span>Mark Refund as Completed</span>
-                      </button>
-                      <p className="text-[10px] text-amber-700 text-center italic">
-                        Confirms you've manually processed this refund
-                      </p>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {order.refund_status === 'completed' && (
-                <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl space-y-2">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-1.5 text-emerald-900 font-bold text-xs">
-                      <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                      <span>Refund Completed</span>
-                    </div>
-                    <span className="font-mono-code font-bold text-emerald-950 text-sm">
-                      {formatCurrency(order.total_amount)}
-                    </span>
-                  </div>
-                  <div className="text-[11px] text-emerald-800 font-mono-code">
-                    Refunded on: {formatDateTime(order.refunded_at)}
-                  </div>
-                  <p className="text-[10px] text-emerald-700">
-                    Admin confirmed that the manual refund transaction has been executed.
-                  </p>
-                </div>
-              )}
-
-              {order.refund_status === 'not_applicable' && (
-                <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-600 space-y-1">
-                  <div className="font-semibold text-slate-800">No Refund Applicable</div>
-                  <div className="text-[11px] text-slate-500">
-                    This order was placed via COD or unpaid status; no financial refund is required.
+                  <div className="text-[11px] text-slate-500 font-mono mt-0.5">
+                    {step.timestamp ? formatDateTime(step.timestamp) : 'Pending'}
                   </div>
                 </div>
-              )}
-            </div>
-          )}
-          {/* Recipient & Contact Details Card */}
-          <div className="bg-white rounded-xl border border-slate-200 p-4 sm:p-5 shadow-xs space-y-3">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
-              <h2 className="text-xs font-bold uppercase font-mono-code text-slate-700 tracking-wider flex items-center gap-1.5">
-                <Phone className="w-3.5 h-3.5 text-slate-500" />
-                <span>Customer / Recipient</span>
-              </h2>
-            </div>
-
-            <div>
-              <div className="text-sm font-bold text-slate-900">{order.recipient_name}</div>
-              <div className="text-xs text-slate-600 font-mono-code mt-1 flex items-center justify-between">
-                <span>{order.recipient_phone}</span>
-                <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={() => copyToClipboard(order.recipient_phone, 'phone')}
-                    className="p-1 text-slate-400 hover:text-slate-700 rounded cursor-pointer"
-                    title="Copy Phone"
-                  >
-                    {copiedKey === 'phone' ? (
-                      <Check className="w-3 h-3 text-emerald-600" />
-                    ) : (
-                      <Copy className="w-3 h-3" />
-                    )}
-                  </button>
-                  <a
-                    href={`tel:${order.recipient_phone}`}
-                    className="p-1 text-slate-400 hover:text-emerald-700 rounded"
-                    title="Call customer"
-                  >
-                    <Phone className="w-3 h-3" />
-                  </a>
-                </div>
               </div>
-            </div>
-          </div>
-
-          {/* Shipping Address Card with Google Maps */}
-          <div className="bg-white rounded-xl border border-slate-200 p-4 sm:p-5 shadow-xs space-y-3">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
-              <h2 className="text-xs font-bold uppercase font-mono-code text-slate-700 tracking-wider flex items-center gap-1.5">
-                <MapPin className="w-3.5 h-3.5 text-slate-500" />
-                <span>Delivery Destination</span>
-              </h2>
-              <button
-                type="button"
-                onClick={() => copyToClipboard(fullAddress, 'address')}
-                className="text-[11px] text-amber-700 hover:text-amber-800 font-semibold flex items-center gap-1 cursor-pointer"
-              >
-                {copiedKey === 'address' ? (
-                  <>
-                    <Check className="w-3 h-3 text-emerald-600" /> Copied
-                  </>
-                ) : (
-                  <>
-                    <Copy className="w-3 h-3" /> Copy Address
-                  </>
-                )}
-              </button>
-            </div>
-
-            <div className="text-xs text-slate-700 leading-relaxed space-y-1">
-              <div className="font-semibold text-slate-900">{order.address_line1}</div>
-              {order.address_line2 && <div>{order.address_line2}</div>}
-              <div>
-                {order.city}, {order.state} -{' '}
-                <span className="font-mono-code font-bold text-slate-900">{order.pincode}</span>
-              </div>
-            </div>
-
-            {order.delivery_notes && (
-              <div className="p-2.5 bg-amber-50/70 border border-amber-200 rounded-lg text-xs text-amber-900 space-y-0.5">
-                <div className="font-bold flex items-center gap-1 text-[11px] uppercase tracking-wider">
-                  <Info className="w-3 h-3 text-amber-600" /> Special Delivery Note:
-                </div>
-                <div className="italic">{order.delivery_notes}</div>
-              </div>
-            )}
-
-            {/* Google Maps link */}
-            {googleMapsUrl && (
-              <div className="pt-2">
-                <a
-                  href={googleMapsUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="w-full flex items-center justify-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-semibold rounded-lg border border-slate-200 transition"
-                >
-                  <MapPin className="w-3.5 h-3.5 text-rose-600" />
-                  <span>Open in Google Maps</span>
-                  <ExternalLink className="w-3 h-3 text-slate-400 ml-0.5" />
-                </a>
-              </div>
-            )}
-          </div>
-
-          {/* Payment & Financial Summary Card */}
-          <div className="bg-white rounded-xl border border-slate-200 p-4 sm:p-5 shadow-xs space-y-3">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
-              <h2 className="text-xs font-bold uppercase font-mono-code text-slate-700 tracking-wider flex items-center gap-1.5">
-                <CreditCard className="w-3.5 h-3.5 text-slate-500" />
-                <span>Payment & Invoicing</span>
-              </h2>
-              <span
-                className={`text-[10px] px-2 py-0.5 rounded font-sans border font-medium ${payBadge.bg} ${payBadge.text} ${payBadge.border}`}
-              >
-                {payBadge.label}
-              </span>
-            </div>
-
-            <div className="space-y-2 text-xs">
-              <div className="flex justify-between text-slate-600">
-                <span>Payment Method</span>
-                <span className="font-mono-code font-bold uppercase text-slate-900">
-                  {order.payment_method || 'COD'}
-                </span>
-              </div>
-              <div className="flex justify-between text-slate-600">
-                <span>Subtotal</span>
-                <span className="font-mono-code font-semibold text-slate-900">
-                  {formatCurrency(order.subtotal)}
-                </span>
-              </div>
-              {order.coupon_code && (
-                <div className="flex justify-between text-emerald-700">
-                  <span>Coupon Applied</span>
-                  <span className="font-mono-code font-bold">{order.coupon_code}</span>
-                </div>
-              )}
-              <div className="pt-2 border-t border-slate-100 flex justify-between items-center text-sm font-bold">
-                <span className="text-slate-900">Total Charged</span>
-                <span className="font-mono-code text-base text-slate-950">
-                  {formatCurrency(order.total_amount)}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* Customer Delivery Notes (if any) */}
-          {(order.delivery_notes || order.gate_instructions || order.landmark) && (
-            <div className="bg-white rounded-xl border border-slate-200/80 p-4 sm:p-5 shadow-xs space-y-2">
-              <div className="flex items-center gap-1.5 border-b border-slate-100 pb-2">
-                <FileText className="w-3.5 h-3.5 text-slate-500" />
-                <h2 className="text-xs font-bold uppercase tracking-wider text-slate-700">
-                  Customer Delivery Instructions
-                </h2>
-              </div>
-              {order.delivery_notes && (
-                <p className="text-xs text-slate-700 leading-relaxed bg-slate-50 p-2.5 rounded-lg border border-slate-100">
-                  {order.delivery_notes}
-                </p>
-              )}
-              {order.gate_instructions && (
-                <p className="text-xs text-slate-600">
-                  <span className="font-semibold text-slate-700">Gate / Entry: </span>
-                  {order.gate_instructions}
-                </p>
-              )}
-              {order.landmark && (
-                <p className="text-xs text-slate-600">
-                  <span className="font-semibold text-slate-700">Landmark: </span>
-                  {order.landmark}
-                </p>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Right Column (2/3): Items Packing Workspace & Customer Live Timeline */}
-        <div className="lg:col-span-2 space-y-5">
-          {/* Dispatch & Rider Quick Actions Bar */}
-          <div className="bg-white rounded-xl border border-slate-200 p-4 sm:p-5 shadow-xs space-y-3">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
-              <div>
-                <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                  <Truck className="w-4 h-4 text-cyan-600" />
-                  <span>Delivery Fleet & Milestone Actions</span>
-                </h2>
-                <p className="text-xs text-slate-500">
-                  Manage rider dispatch, trigger real-time customer updates, and record proof of delivery.
-                </p>
-              </div>
-
-              {delivery?.delivery_partner ? (
-                <div className="flex items-center gap-2 text-xs bg-cyan-50 text-cyan-900 px-3 py-1 rounded-lg border border-cyan-200 font-medium">
-                  <span className="font-semibold">Rider: {delivery.delivery_partner.name}</span>
-                  <span>({delivery.delivery_partner.phone})</span>
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => setShowAssignModal(true)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-cyan-700 hover:bg-cyan-800 rounded-lg shadow-xs transition"
-                >
-                  <UserPlus className="w-3.5 h-3.5" /> Assign Delivery Partner
-                </button>
-              )}
-            </div>
-
-            {/* Rider Milestone Progress Bar */}
-            <div className="flex items-center gap-2 flex-wrap pt-1">
-              {!delivery?.delivery_partner_id ? (
-                <button
-                  type="button"
-                  onClick={() => setShowAssignModal(true)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-cyan-900 bg-cyan-50 hover:bg-cyan-100 border border-cyan-300 rounded-lg transition"
-                >
-                  <UserPlus className="w-3.5 h-3.5" /> 1. Assign Rider
-                </button>
-              ) : (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => setShowAssignModal(true)}
-                    className="px-2.5 py-1.5 text-xs font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition"
-                  >
-                    Change Rider
-                  </button>
-
-                  <button
-                    type="button"
-                    disabled={updating}
-                    onClick={() => handleDeliveryStatusChange('picked_up')}
-                    className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-sky-900 bg-sky-50 hover:bg-sky-100 border border-sky-300 rounded-lg transition disabled:opacity-50"
-                  >
-                    <Truck className="w-3.5 h-3.5" /> 2. Mark Picked Up
-                  </button>
-
-                  <button
-                    type="button"
-                    disabled={updating}
-                    onClick={() => handleDeliveryStatusChange('out_for_delivery')}
-                    className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-blue-900 bg-blue-50 hover:bg-blue-100 border border-blue-300 rounded-lg transition disabled:opacity-50"
-                  >
-                    <Truck className="w-3.5 h-3.5" /> 3. Out for Delivery
-                  </button>
-
-                  <button
-                    type="button"
-                    disabled={updating}
-                    onClick={() =>
-                      handleDeliveryStatusChange('near_destination', { locationName: order.city })
-                    }
-                    className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-amber-900 bg-amber-50 hover:bg-amber-100 border border-amber-300 rounded-lg transition disabled:opacity-50"
-                  >
-                    <MapPin className="w-3.5 h-3.5 text-amber-600" /> 4. Trigger “Nearby” Alert
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setShowFailedModal(true)}
-                    className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg transition"
-                  >
-                    <AlertTriangle className="w-3.5 h-3.5" /> Issue / Reschedule
-                  </button>
-                </>
-              )}
-            </div>
-          </div>
-
-          {/* Live Customer Tracking & Timeline Component */}
-          <CustomerTrackingTimeline
-            order={order}
-            delivery={delivery}
-            events={trackingEvents}
-          />
-
-          {/* Items & Packing Checklist Card */}
-          <div className="bg-white rounded-xl border border-slate-200 p-4 sm:p-5 shadow-xs space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
-              <div>
-                <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
-                  <PackageCheck className="w-4 h-4 text-amber-600" />
-                  <span>Order Items & Packing Checklist</span>
-                </h2>
-                <p className="text-xs text-slate-500">
-                  {items.length} unique product line(s) • Check items off while packaging.
-                </p>
-              </div>
-
-              {allItemsPacked && items.length > 0 && (
-                <div className="flex items-center gap-1 px-2.5 py-1 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-md text-xs font-semibold">
-                  <Check className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>All items verified</span>
-                </div>
-              )}
-            </div>
-
-            {items.length === 0 ? (
-              <div className="py-8 text-center text-slate-500 text-xs">
-                <ShoppingBag className="w-8 h-8 text-slate-300 mx-auto mb-2" />
-                <p className="font-semibold text-slate-700">No Item Rows Found</p>
-                <p className="text-slate-400 mt-0.5">
-                  No line records attached to this order in <code className="font-mono-code text-[11px]">order_items</code>.
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {items.map((item, idx) => {
-                  const isChecked = Boolean(checkedItems[item.id]);
-                  const lineTotal = (item.quantity || 1) * (item.price_at_purchase || 0);
-
-                  return (
-                    <div
-                      key={item.id || idx}
-                      onClick={() => handleToggleCheckItem(item.id)}
-                      className={`p-3.5 rounded-xl border transition cursor-pointer flex items-center justify-between gap-3 ${
-                        isChecked
-                          ? 'bg-emerald-50/40 border-emerald-300 ring-1 ring-emerald-300/50'
-                          : 'bg-white hover:bg-slate-50/70 border-slate-200'
-                      }`}
-                    >
-                      {/* Checkbox & Thumbnail */}
-                      <div className="flex items-center gap-3 min-w-0">
-                        <button
-                          type="button"
-                          className="text-slate-400 hover:text-emerald-600 p-1 shrink-0 cursor-pointer"
-                          aria-label="Toggle packed status"
-                        >
-                          {isChecked ? (
-                            <CheckSquare className="w-5 h-5 text-emerald-600" />
-                          ) : (
-                            <Square className="w-5 h-5 text-slate-300" />
-                          )}
-                        </button>
-
-                        {item.product_image ? (
-                          <img
-                            src={item.product_image}
-                            alt={item.product_name}
-                            className="w-12 h-12 object-contain bg-slate-50 border border-slate-200 rounded-lg shrink-0 p-1"
-                            referrerPolicy="no-referrer"
-                          />
-                        ) : (
-                          <div className="w-12 h-12 bg-slate-100 border border-slate-200 rounded-lg flex items-center justify-center shrink-0">
-                            <Box className="w-5 h-5 text-slate-400" />
-                          </div>
-                        )}
-
-                        <div className="min-w-0">
-                          <div
-                            className={`text-xs sm:text-sm font-semibold truncate ${
-                              isChecked ? 'text-slate-900 line-through opacity-80' : 'text-slate-900'
-                            }`}
-                            title={item.product_name}
-                          >
-                            {item.product_name}
-                          </div>
-                          <div className="text-[11px] text-slate-500 font-mono-code mt-0.5">
-                            {item.brand ? `${item.brand} • ` : ''}
-                            {formatCurrency(item.price_at_purchase)}{' '}
-                            {item.unit ? `(${item.unit})` : ''}
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Quantity & Line Total */}
-                      <div className="text-right shrink-0">
-                        <div className="font-mono-code font-bold text-slate-900 text-sm">
-                          <span className="text-xs text-slate-500 font-normal">Qty: </span>
-                          <span className="px-2 py-0.5 bg-slate-100 border border-slate-200 rounded text-slate-900 font-mono-code">
-                            {item.quantity}
-                          </span>
-                        </div>
-                        <div className="text-xs text-slate-500 font-mono-code mt-1">
-                          {formatCurrency(lineTotal)}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-
-            {/* Packing Summary Footer */}
-            <div className="pt-3 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-slate-600">
-              <div className="font-mono-code">
-                Items Packed:{' '}
-                <span className="font-bold text-slate-900">
-                  {Object.values(checkedItems).filter(Boolean).length}
-                </span>{' '}
-                / {items.length} lines
-              </div>
-
-              {order.status === 'packing' && (
-                <button
-                  type="button"
-                  onClick={() => handleTransitionStatus('packed')}
-                  className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-lg text-xs transition cursor-pointer shadow-xs"
-                >
-                  Confirm Packing Done
-                </button>
-              )}
-            </div>
+            ))}
           </div>
         </div>
       </div>
 
-      {/* Assign Delivery Partner Modal */}
-      {showAssignModal && (
-        <AssignPartnerModal
-          isOpen={true}
-          orderId={order.id}
-          currentPartnerId={delivery?.delivery_partner_id}
-          defaultNotes={order.delivery_notes}
-          onClose={() => setShowAssignModal(false)}
-          onAssign={handleAssignPartner}
-        />
-      )}
+      {/* Camera SKU Scan Popup: camera viewfinder, barcode detection, and checklist confirmation */}
+      {isCameraOpen && (
+        <div className="fixed inset-0 z-50 bg-black flex flex-col items-center justify-center">
+          <button
+            type="button"
+            onClick={closeCamera}
+            className="absolute top-4 right-4 z-20 w-10 h-10 rounded-full bg-black/60 text-white flex items-center justify-center active:scale-95 transition cursor-pointer"
+            aria-label="Close camera"
+          >
+            <X className="w-6 h-6" />
+          </button>
 
-      {/* Failed Delivery / Reschedule Modal */}
-      {showFailedModal && (
-        <FailedDeliveryModal
-          isOpen={true}
-          orderId={order.id}
-          onClose={() => setShowFailedModal(false)}
-          onSubmit={handleFailedSubmit}
-        />
-      )}
-
-      {/* Cancel Order Confirmation Modal */}
-      {showCancelModal && (
-        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl border border-slate-200 max-w-md w-full p-5 sm:p-6 shadow-xl space-y-4">
-            <div className="flex items-center gap-3 text-rose-600">
-              <div className="w-10 h-10 rounded-full bg-rose-50 flex items-center justify-center border border-rose-200 shrink-0">
-                <AlertCircle className="w-5 h-5 text-rose-600" />
-              </div>
-              <div>
-                <h3 className="text-base font-bold text-slate-900">Cancel Order #{formatShortId(order.id)}?</h3>
-                <p className="text-xs text-slate-500 font-mono-code">{order.id}</p>
+          {scanningItem && (
+            <div className="absolute top-4 left-4 right-16 z-20">
+              <div className="bg-black/70 backdrop-blur-xs text-white px-3 py-2 rounded-xl text-xs flex items-center gap-2 border border-white/10 shadow-lg">
+                <span className="font-bold text-emerald-400 shrink-0">SKU Scanner:</span>
+                <span className="truncate font-medium">{scanningItem.product_name}</span>
               </div>
             </div>
+          )}
 
-            {/* Crucial Warning Notice */}
-            <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-800 leading-relaxed font-medium">
-              ⚠️ This will cancel the order and automatically restock all items back into inventory.
+          <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            muted
+            className="w-full h-full object-cover"
+          />
+
+          {/* Viewfinder reticle overlay */}
+          <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+            <div className="w-64 h-64 border-2 border-emerald-400/80 rounded-2xl relative shadow-[0_0_0_9999px_rgba(0,0,0,0.45)]">
+              <div className="absolute top-0 left-0 w-6 h-6 border-t-4 border-l-4 border-emerald-400 -mt-1 -ml-1 rounded-tl-sm" />
+              <div className="absolute top-0 right-0 w-6 h-6 border-t-4 border-r-4 border-emerald-400 -mt-1 -mr-1 rounded-tr-sm" />
+              <div className="absolute bottom-0 left-0 w-6 h-6 border-b-4 border-l-4 border-emerald-400 -mb-1 -ml-1 rounded-bl-sm" />
+              <div className="absolute bottom-0 right-0 w-6 h-6 border-b-4 border-r-4 border-emerald-400 -mb-1 -mr-1 rounded-br-sm" />
+              <div className="absolute inset-x-4 top-1/2 h-0.5 bg-emerald-400/70 shadow-[0_0_8px_#34d399] animate-pulse" />
             </div>
+          </div>
 
-            {cancelModalError && (
-              <div className="p-3 bg-rose-100 border border-rose-300 text-rose-900 text-xs rounded-lg flex items-start gap-2">
-                <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
-                <span>{cancelModalError}</span>
-              </div>
-            )}
-
-            <div className="space-y-2">
-              <label className="text-xs font-semibold text-slate-700">Reason for Cancellation (Optional):</label>
-              <select
-                value={cancelReason}
-                onChange={(e) => setCancelReason(e.target.value)}
-                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-rose-500"
-              >
-                <option value="Customer Request">Customer requested cancellation</option>
-                <option value="Out of Stock">Item out of stock</option>
-                <option value="Delivery Unserviceable">Delivery address unserviceable</option>
-                <option value="Payment Issue">Payment failed / unverified</option>
-                <option value="Duplicate Order">Duplicate order placed</option>
-                <option value="Other">Other reason...</option>
-              </select>
-
-              <input
-                type="text"
-                value={customCancelReason}
-                onChange={(e) => setCustomCancelReason(e.target.value)}
-                placeholder="Additional notes / specifics (optional)..."
-                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-rose-500"
-              />
-            </div>
-
-            <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-2">
+          {/* Action to manually confirm / checklist item if barcode auto-detect is pending */}
+          <div className="absolute bottom-8 inset-x-0 z-20 flex flex-col items-center gap-2 px-6">
+            {scanningItem && (
               <button
                 type="button"
                 onClick={() => {
-                  setShowCancelModal(false);
-                  setCancelModalError(null);
+                  markItemChecked(scanningItem.id);
+                  closeCamera();
                 }}
-                disabled={updating}
-                className="px-3.5 py-2 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition cursor-pointer"
+                className="w-full max-w-xs py-3 px-4 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white font-bold text-sm rounded-xl flex items-center justify-center gap-2 shadow-xl cursor-pointer transition"
               >
-                Keep Order
+                <Check className="w-4 h-4 stroke-[3]" />
+                Checklist Item as Verified
               </button>
-              <button
-                id="btn-confirm-cancel-order"
-                type="button"
-                onClick={handleConfirmCancellation}
-                disabled={updating}
-                className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-lg transition cursor-pointer disabled:opacity-50 flex items-center gap-1.5 active:scale-98"
-              >
-                {updating && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                <span>{updating ? 'Cancelling & Restocking...' : 'Confirm Cancellation'}</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Delete Order Confirmation Modal */}
-      {showDeleteModal && (
-        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl border border-rose-200 max-w-md w-full p-5 sm:p-6 shadow-xl space-y-4">
-            <div className="flex items-start gap-3">
-              <div className="p-2.5 bg-rose-100 rounded-xl text-rose-600 shrink-0">
-                <Trash2 className="w-5 h-5 text-rose-600" />
-              </div>
-              <div>
-                <h3 className="text-base font-bold text-slate-900">
-                  Delete Order #{formatShortId(order.id)}?
-                </h3>
-                <p className="text-xs text-slate-500 font-mono-code">{order.id}</p>
-              </div>
-            </div>
-
-            <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-950 leading-relaxed space-y-2">
-              <p className="font-semibold flex items-center gap-1.5 text-rose-900">
-                <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
-                Permanent Deletion Notice
-              </p>
-              <p className="text-rose-800 text-[11.5px]">
-                This will permanently delete this order, all ordered items, delivery assignments, and timeline logs from the database.
-              </p>
-              <p className="text-rose-900 text-[11.5px] font-bold">
-                This order will be completely removed from user order history and operational views. This action cannot be undone.
-              </p>
-            </div>
-
-            {deleteModalError && (
-              <div className="p-3 bg-rose-100 border border-rose-300 text-rose-900 text-xs rounded-lg flex items-start gap-2">
-                <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
-                <span>{deleteModalError}</span>
-              </div>
             )}
-
-            <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setShowDeleteModal(false);
-                  setDeleteModalError(null);
-                }}
-                disabled={deleting}
-                className="px-3.5 py-2 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                id="btn-confirm-delete-order"
-                type="button"
-                onClick={handleConfirmDeleteOrder}
-                disabled={deleting}
-                className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-lg transition cursor-pointer disabled:opacity-50 flex items-center gap-1.5 active:scale-98"
-              >
-                {deleting && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                <span>{deleting ? 'Deleting Order...' : 'Delete Order Permanently'}</span>
-              </button>
-            </div>
+            <span className="text-[11px] text-white/70">
+              Align product barcode/SKU with frame or tap button to verify
+            </span>
           </div>
+
+          {cameraError && (
+            <div className="absolute bottom-24 px-4 py-2 rounded-lg bg-rose-600/95 text-white text-xs max-w-[85%] text-center z-30 shadow-lg">
+              {cameraError}
+            </div>
+          )}
         </div>
       )}
-    </div>
+
+      {/* Hidden printable packing slip for PDF print button */}
+      <PackingSlip order={order} items={items} />
+    </>
   );
 };

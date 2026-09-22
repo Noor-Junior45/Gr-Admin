@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { Sidebar } from './Sidebar';
-import { Header } from './Header';
 import { BottomNavBar } from './BottomNavBar';
 import { NewOrderAlertBanner } from './NewOrderAlertBanner';
 import { NotificationSettingsModal } from './NotificationSettingsModal';
@@ -45,20 +44,19 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
         onCloseMobile={() => setMobileNavOpen(false)}
       />
 
-      {/* Main Content Area */}
+      {/* Main Content Area (without top navbar) */}
       <div
         className={`flex-1 flex flex-col transition-all duration-200 ${
           sidebarCollapsed ? 'lg:pl-18' : 'lg:pl-64'
         }`}
       >
-        <Header onOpenMobileNav={() => setMobileNavOpen(true)} />
-        <main className="flex-1 p-3 sm:p-6 pb-24 lg:pb-6 max-w-7xl w-full mx-auto">
+        <main className="flex-1 p-3 sm:p-6 pt-4 sm:pt-6 pb-24 sm:pb-28 max-w-7xl w-full mx-auto">
           {children}
         </main>
       </div>
 
-      {/* Mobile App Bottom Navigation Bar (Phone & Tablet) */}
-      <BottomNavBar />
+      {/* Always Visible Bottom Navigation Bar for All Screen Sizes */}
+      <BottomNavBar sidebarCollapsed={sidebarCollapsed} />
     </div>
   );
 };

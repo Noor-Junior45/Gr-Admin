@@ -1,8 +1,13 @@
-// Web Audio API Synthesizer for instant, zero-dependency audio alerts
+// Web Audio API Synthesizer for instant, zero-dependency order alerts and continuous alarm ringing
 
 export type SoundType =
-  | 'melody'
+  | 'service_bell'
+  | 'alarm_chime'
+  | 'urgent_buzzer'
+  | 'classic_dingdong'
   | 'cash_register'
+  | 'melody'
+  // Backward-compatibility aliases
   | 'chime'
   | 'ding_dong'
   | 'radar'
@@ -17,45 +22,45 @@ export interface SoundOption {
 
 export const SOUND_OPTIONS: SoundOption[] = [
   {
-    id: 'melody',
-    name: 'Joyful Melody (Song)',
-    description: 'Upbeat 8-note musical sequence with bright harmonies',
+    id: 'service_bell',
+    name: 'Order Service Bell',
+    description: 'Crisp, loud restaurant service bell chime with realistic metallic ring',
+    durationSec: 1.6,
+  },
+  {
+    id: 'alarm_chime',
+    name: 'Order Alarm Siren',
+    description: 'High-urgency two-tone order alarm that cuts through warehouse noise',
+    durationSec: 1.5,
+  },
+  {
+    id: 'urgent_buzzer',
+    name: 'Delivery Terminal Alert',
+    description: 'Sharp triple-tone commercial delivery terminal notification',
+    durationSec: 1.2,
+  },
+  {
+    id: 'classic_dingdong',
+    name: 'Shop Doorbell (Ding-Dong)',
+    description: 'Acoustic brass two-tone bell chime with long warm sustain',
     durationSec: 1.6,
   },
   {
     id: 'cash_register',
-    name: 'Cash Register & Chime',
-    description: 'Crisp retail register ring and metallic coins chime',
+    name: 'Cash Register Ring',
+    description: 'Mechanical register drawer ring with metallic coin chime',
     durationSec: 1.2,
   },
   {
-    id: 'chime',
-    name: 'Warehouse Bell Chime',
-    description: 'Warm vibraphone 3-tone announcement bell',
-    durationSec: 1.4,
-  },
-  {
-    id: 'ding_dong',
-    name: 'Doorbell Ding-Dong',
-    description: 'Classic rich two-tone entrance bell',
-    durationSec: 1.0,
-  },
-  {
-    id: 'fanfare',
-    name: 'Celebration Fanfare',
-    description: 'Triumphant brass chime for incoming sales',
+    id: 'melody',
+    name: 'Musical Chime',
+    description: 'Upbeat 8-note melodic chime',
     durationSec: 1.5,
-  },
-  {
-    id: 'radar',
-    name: 'High-Priority Pulse',
-    description: 'High-frequency double ping for noisy warehouse floors',
-    durationSec: 0.8,
   },
 ];
 
 let globalAudioCtx: AudioContext | null = null;
-let activeLoopTimeout: NodeJS.Timeout | null = null;
+let activeLoopTimeout: ReturnType<typeof setTimeout> | null = null;
 let isCurrentlyLooping = false;
 
 function getAudioContext(): AudioContext | null {
@@ -94,7 +99,7 @@ export async function unlockAudioContext(): Promise<boolean> {
 }
 
 /**
- * Play a single synthesized note with envelope
+ * Play a single synthesized note with attack-decay envelope
  */
 function playTone(
   ctx: AudioContext,
@@ -110,10 +115,10 @@ function playTone(
   osc.type = type;
   osc.frequency.setValueAtTime(freq, startTime);
 
-  // Attack-Decay envelope
-  gain.gain.setValueAtTime(0.001, startTime);
-  gain.gain.exponentialRampToValueAtTime(Math.max(gainValue, 0.001), startTime + 0.02);
-  gain.gain.exponentialRampToValueAtTime(0.0001, startTime + duration);
+  // Instant attack, exponential decay envelope
+  gain.gain.setValueAtTime(0.0001, startTime);
+  gain.gain.exponentialRampToValueAtTime(Math.max(gainValue, 0.0001), startTime + 0.008);
+  gain.gain.exponentialRampToValueAtTime(0.00001, startTime + duration);
 
   osc.connect(gain);
   gain.connect(ctx.destination);
@@ -123,87 +128,141 @@ function playTone(
 }
 
 /**
- * Play specific synthesized sound sequence
+ * Synthesize a physically modeled acoustic bell strike with natural inharmonic overtones
  */
-export function playSoundEffect(type: SoundType, volume: number = 0.8) {
+function playAcousticBell(
+  ctx: AudioContext,
+  baseFreq: number,
+  startTime: number,
+  duration: number,
+  volume: number
+) {
+  // Acoustic partials of physical cast metal bells:
+  // Fundamental (hum), Prime (strike), Minor 3rd (tierce), 5th (quint), Octave (nominal), and high shimmer
+  const partials = [
+    { mult: 0.5, gain: 0.35, decay: duration * 1.1, type: 'sine' as OscillatorType },
+    { mult: 1.0, gain: 1.0, decay: duration, type: 'sine' as OscillatorType },
+    { mult: 1.2, gain: 0.55, decay: duration * 0.75, type: 'sine' as OscillatorType },
+    { mult: 1.5, gain: 0.4, decay: duration * 0.6, type: 'sine' as OscillatorType },
+    { mult: 2.0, gain: 0.65, decay: duration * 0.8, type: 'sine' as OscillatorType },
+    { mult: 2.76, gain: 0.3, decay: duration * 0.45, type: 'triangle' as OscillatorType },
+    { mult: 4.07, gain: 0.22, decay: duration * 0.3, type: 'sine' as OscillatorType },
+  ];
+
+  partials.forEach((p) => {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.type = p.type;
+    osc.frequency.setValueAtTime(baseFreq * p.mult, startTime);
+
+    const targetGain = Math.max(0.0001, volume * p.gain);
+    gain.gain.setValueAtTime(0.0001, startTime);
+    // Instant hammer impact (4ms)
+    gain.gain.exponentialRampToValueAtTime(targetGain, startTime + 0.004);
+    // Exponential resonance decay
+    gain.gain.exponentialRampToValueAtTime(0.00001, startTime + p.decay);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.start(startTime);
+    osc.stop(startTime + p.decay + 0.05);
+  });
+}
+
+/**
+ * Play specific synthesized sound effect
+ */
+export function playSoundEffect(type: SoundType, volume: number = 0.85) {
   const ctx = getAudioContext();
   if (!ctx) return;
 
   const now = ctx.currentTime + 0.02;
-  const masterVolume = Math.max(0.05, Math.min(volume, 1.0)) * 0.7;
+  const masterVolume = Math.max(0.1, Math.min(volume, 1.0)) * 0.75;
 
   switch (type) {
+    case 'service_bell':
+    case 'chime': {
+      // Order Service Bell: Crisp triple strike chime (Ding! Ding! Ding!)
+      // Resonant frequencies: C6 (1046.5Hz), E6 (1318.5Hz), G6 (1567.98Hz)
+      playAcousticBell(ctx, 1046.5, now, 1.3, masterVolume);
+      playAcousticBell(ctx, 1318.5, now + 0.15, 1.4, masterVolume * 1.05);
+      playAcousticBell(ctx, 1567.98, now + 0.32, 1.6, masterVolume * 1.15);
+      break;
+    }
+
+    case 'alarm_chime': {
+      // High-urgency food delivery order alarm: 4-pulse alternating chime
+      // (High-Low-High-Low with bright bell acoustics)
+      playTone(ctx, 880.0, now, 0.18, masterVolume * 0.9, 'triangle');
+      playTone(ctx, 1760.0, now, 0.16, masterVolume * 0.35, 'sine');
+
+      playTone(ctx, 1174.66, now + 0.16, 0.2, masterVolume, 'triangle');
+      playTone(ctx, 2349.32, now + 0.16, 0.18, masterVolume * 0.35, 'sine');
+
+      playTone(ctx, 880.0, now + 0.35, 0.18, masterVolume * 0.9, 'triangle');
+      playTone(ctx, 1760.0, now + 0.35, 0.16, masterVolume * 0.35, 'sine');
+
+      playTone(ctx, 1174.66, now + 0.52, 0.45, masterVolume * 1.1, 'triangle');
+      playTone(ctx, 2349.32, now + 0.52, 0.4, masterVolume * 0.4, 'sine');
+      break;
+    }
+
+    case 'urgent_buzzer':
+    case 'radar': {
+      // Triple commercial order buzzer beep (like scanner terminal)
+      playTone(ctx, 1760.0, now, 0.09, masterVolume * 0.95, 'square');
+      playTone(ctx, 2093.0, now + 0.12, 0.09, masterVolume, 'square');
+      playTone(ctx, 2637.0, now + 0.24, 0.28, masterVolume * 1.1, 'square');
+      break;
+    }
+
+    case 'classic_dingdong':
+    case 'ding_dong': {
+      // Classic Ding-Dong counter doorbell
+      playAcousticBell(ctx, 987.77, now, 1.2, masterVolume);
+      playAcousticBell(ctx, 659.25, now + 0.34, 1.6, masterVolume * 1.15);
+      break;
+    }
+
+    case 'cash_register': {
+      // Mechanical register drawer lever click
+      playTone(ctx, 1200, now, 0.04, masterVolume * 0.8, 'square');
+      playTone(ctx, 1600, now + 0.04, 0.05, masterVolume * 0.9, 'square');
+
+      // Metallic coin register bell
+      playAcousticBell(ctx, 1760.0, now + 0.1, 0.8, masterVolume * 0.7);
+      playAcousticBell(ctx, 2637.0, now + 0.22, 1.0, masterVolume * 0.8);
+      break;
+    }
+
     case 'melody': {
-      // 8-note energetic cheerful tune (C5, E5, G5, A5, B5, C6, G5, C6)
+      // 8-note energetic cheerful tune
       const notes = [
-        { freq: 523.25, time: 0, dur: 0.15, type: 'triangle' as OscillatorType },
-        { freq: 659.25, time: 0.14, dur: 0.15, type: 'triangle' as OscillatorType },
-        { freq: 783.99, time: 0.28, dur: 0.16, type: 'triangle' as OscillatorType },
-        { freq: 880.00, time: 0.44, dur: 0.16, type: 'sine' as OscillatorType },
-        { freq: 987.77, time: 0.60, dur: 0.18, type: 'triangle' as OscillatorType },
-        { freq: 1046.5, time: 0.80, dur: 0.35, type: 'sine' as OscillatorType },
-        { freq: 783.99, time: 1.15, dur: 0.18, type: 'sine' as OscillatorType },
-        { freq: 1046.5, time: 1.35, dur: 0.50, type: 'triangle' as OscillatorType },
+        { freq: 523.25, time: 0, dur: 0.14, type: 'triangle' as OscillatorType },
+        { freq: 659.25, time: 0.13, dur: 0.14, type: 'triangle' as OscillatorType },
+        { freq: 783.99, time: 0.26, dur: 0.15, type: 'triangle' as OscillatorType },
+        { freq: 880.0, time: 0.42, dur: 0.15, type: 'sine' as OscillatorType },
+        { freq: 987.77, time: 0.58, dur: 0.16, type: 'triangle' as OscillatorType },
+        { freq: 1046.5, time: 0.76, dur: 0.3, type: 'sine' as OscillatorType },
+        { freq: 783.99, time: 1.1, dur: 0.16, type: 'sine' as OscillatorType },
+        { freq: 1046.5, time: 1.3, dur: 0.45, type: 'triangle' as OscillatorType },
       ];
       notes.forEach((n) => {
         playTone(ctx, n.freq, now + n.time, n.dur, masterVolume, n.type);
-        // Add subtle harmonic layer
         playTone(ctx, n.freq * 2, now + n.time, n.dur * 0.6, masterVolume * 0.2, 'sine');
       });
       break;
     }
 
-    case 'cash_register': {
-      // Register click + metallic chime chords
-      playTone(ctx, 1200, now, 0.05, masterVolume * 0.8, 'square');
-      playTone(ctx, 1600, now + 0.04, 0.06, masterVolume * 0.9, 'square');
-
-      // Cash bells
-      const bells = [
-        { freq: 1760.0, time: 0.12, dur: 0.5 },
-        { freq: 2637.0, time: 0.22, dur: 0.6 },
-        { freq: 3520.0, time: 0.32, dur: 0.8 },
-      ];
-      bells.forEach((b) => {
-        playTone(ctx, b.freq, now + b.time, b.dur, masterVolume * 0.6, 'sine');
-        playTone(ctx, b.freq * 1.5, now + b.time, b.dur * 0.7, masterVolume * 0.25, 'triangle');
-      });
-      break;
-    }
-
-    case 'chime': {
-      // 3-tone vibraphone bell chime (F5 -> A5 -> C6)
-      const chimeNotes = [
-        { freq: 698.46, time: 0, dur: 0.4 },
-        { freq: 880.00, time: 0.25, dur: 0.5 },
-        { freq: 1046.5, time: 0.55, dur: 0.9 },
-      ];
-      chimeNotes.forEach((n) => {
-        playTone(ctx, n.freq, now + n.time, n.dur, masterVolume, 'sine');
-        playTone(ctx, n.freq * 2, now + n.time, n.dur * 0.8, masterVolume * 0.35, 'triangle');
-        playTone(ctx, n.freq * 3, now + n.time, n.dur * 0.3, masterVolume * 0.15, 'sine');
-      });
-      break;
-    }
-
-    case 'ding_dong': {
-      // High Ding -> Lower Dong
-      playTone(ctx, 987.77, now, 0.5, masterVolume, 'sine');
-      playTone(ctx, 1975.5, now, 0.4, masterVolume * 0.3, 'triangle');
-
-      playTone(ctx, 659.25, now + 0.35, 0.8, masterVolume * 1.1, 'sine');
-      playTone(ctx, 1318.5, now + 0.35, 0.6, masterVolume * 0.35, 'triangle');
-      break;
-    }
-
     case 'fanfare': {
-      // Brass fanfare: G4 -> C5 -> E5 -> G5 (held)
       const fanNotes = [
-        { freq: 392.00, time: 0, dur: 0.15 },
-        { freq: 523.25, time: 0.15, dur: 0.15 },
-        { freq: 659.25, time: 0.30, dur: 0.18 },
-        { freq: 783.99, time: 0.50, dur: 0.75 },
-        { freq: 1046.5, time: 0.50, dur: 0.75 },
+        { freq: 392.0, time: 0, dur: 0.14 },
+        { freq: 523.25, time: 0.14, dur: 0.14 },
+        { freq: 659.25, time: 0.28, dur: 0.16 },
+        { freq: 783.99, time: 0.46, dur: 0.65 },
+        { freq: 1046.5, time: 0.46, dur: 0.65 },
       ];
       fanNotes.forEach((n) => {
         playTone(ctx, n.freq, now + n.time, n.dur, masterVolume * 0.8, 'sawtooth');
@@ -211,25 +270,16 @@ export function playSoundEffect(type: SoundType, volume: number = 0.8) {
       });
       break;
     }
-
-    case 'radar': {
-      // Double sharp radar beep
-      playTone(ctx, 1500, now, 0.12, masterVolume, 'sine');
-      playTone(ctx, 2200, now + 0.15, 0.18, masterVolume * 1.1, 'sine');
-      playTone(ctx, 1500, now + 0.35, 0.12, masterVolume, 'sine');
-      playTone(ctx, 2200, now + 0.50, 0.25, masterVolume * 1.1, 'sine');
-      break;
-    }
   }
 }
 
 /**
- * Start repeating sound until explicitly stopped
+ * Start repeating sound until explicitly stopped (e.g. order accepted or cancelled)
  */
 export function startSoundLoop(
   type: SoundType,
-  volume: number,
-  repeatIntervalSec: number = 3.5
+  volume: number = 0.85,
+  repeatIntervalSec: number = 2.4
 ) {
   stopSoundLoop();
   isCurrentlyLooping = true;
@@ -237,7 +287,7 @@ export function startSoundLoop(
   const loop = () => {
     if (!isCurrentlyLooping) return;
     playSoundEffect(type, volume);
-    activeLoopTimeout = setTimeout(loop, repeatIntervalSec * 1000);
+    activeLoopTimeout = setTimeout(loop, Math.max(1.4, repeatIntervalSec) * 1000);
   };
 
   loop();

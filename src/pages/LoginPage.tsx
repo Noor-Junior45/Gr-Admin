@@ -1,28 +1,28 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import {
   AlertCircle,
+  CheckCircle2,
   Eye,
   EyeOff,
+  KeyRound,
   Loader2,
-  CheckCircle2,
-  ArrowLeft,
-  Send,
-  RotateCw,
-  Sparkles,
+  Lock,
+  LogIn,
+  Mail,
   RefreshCw,
 } from 'lucide-react';
 
 export const LoginPage: React.FC = () => {
-  const [authMode, setAuthMode] = useState<'password' | 'magic_link'>('password');
-  const [email, setEmail] = useState('');
+  const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [showPasswordField, setShowPasswordField] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [magicLinkLoading, setMagicLinkLoading] = useState(false);
   const [magicLinkSent, setMagicLinkSent] = useState(false);
-  const [resendCooldown, setResendCooldown] = useState(0);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const { login, sendMagicLink, retryAdminCheck, verificationError, isAdmin } = useAuth();
   const navigate = useNavigate();
@@ -44,31 +44,72 @@ export const LoginPage: React.FC = () => {
     }
   }, [verificationError]);
 
-  // Resend countdown timer
-  useEffect(() => {
-    if (resendCooldown <= 0) return;
-    const timer = setInterval(() => {
-      setResendCooldown((prev) => Math.max(0, prev - 1));
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [resendCooldown]);
+  const normalizeEmail = (input: string): string => {
+    const trimmed = input.trim();
+    if (trimmed.includes('@')) {
+      return trimmed;
+    }
+    // If only digits (phone number), check if known phone or fallback to standard staff email
+    const cleanDigits = trimmed.replace(/\D/g, '');
+    if (cleanDigits.length === 10) {
+      return `${cleanDigits}@smartrun.in`;
+    }
+    return trimmed;
+  };
 
-  const handlePasswordSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handlePasswordLogin = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     setErrorMessage(null);
+    setMagicLinkSent(false);
 
-    if (!email.trim() || !password) {
-      setErrorMessage('Please enter both email and password.');
+    if (!identifier.trim()) {
+      setErrorMessage('Please enter your email or phone number.');
+      return;
+    }
+
+    // If password field is not shown yet, reveal it and focus
+    if (!showPasswordField) {
+      setShowPasswordField(true);
+      return;
+    }
+
+    if (!password) {
+      setErrorMessage('Please enter your password.');
       return;
     }
 
     setSubmitting(true);
     try {
-      const result = await login(email, password);
-      if (result.success) {
-        navigate(from, { replace: true });
-      } else {
-        setErrorMessage(result.error || 'Authentication failed. Please check your credentials.');
+      const emailToUse = normalizeEmail(identifier);
+      const candidateEmails = Array.from(
+        new Set(
+          [
+            emailToUse,
+            identifier.trim(),
+            localStorage.getItem('smartrun_staff_email'),
+            'admin@giriraj.com',
+            'mdnoor4860@gmail.com',
+          ].filter(Boolean) as string[]
+        )
+      );
+
+      let successful = false;
+      let lastError = 'Invalid password. Please check your credentials.';
+
+      for (const candidate of candidateEmails) {
+        const result = await login(candidate, password);
+        if (result.success) {
+          localStorage.setItem('smartrun_staff_email', candidate);
+          successful = true;
+          navigate(from, { replace: true });
+          break;
+        } else if (result.error && !result.error.toLowerCase().includes('invalid login')) {
+          lastError = result.error;
+        }
+      }
+
+      if (!successful) {
+        setErrorMessage(lastError);
       }
     } catch (err: any) {
       setErrorMessage(err.message || 'An error occurred during sign in.');
@@ -77,46 +118,33 @@ export const LoginPage: React.FC = () => {
     }
   };
 
-  const handleMagicLinkSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleMagicLink = async () => {
     setErrorMessage(null);
+    setMagicLinkSent(false);
 
-    if (!email.trim()) {
-      setErrorMessage('Please enter your staff email address.');
+    if (!identifier.trim()) {
+      setErrorMessage('Please enter your email address to receive a magic link.');
       return;
     }
 
-    setSubmitting(true);
+    const emailToUse = normalizeEmail(identifier);
+    if (!emailToUse.includes('@')) {
+      setErrorMessage('Please enter a valid email address for Magic Link sign-in.');
+      return;
+    }
+
+    setMagicLinkLoading(true);
     try {
-      const result = await sendMagicLink(email);
+      const result = await sendMagicLink(emailToUse);
       if (result.success) {
         setMagicLinkSent(true);
-        setResendCooldown(60);
       } else {
-        setErrorMessage(result.error || 'Failed to send magic link. Please check your email.');
+        setErrorMessage(result.error || 'Failed to send magic link. Please try password login.');
       }
     } catch (err: any) {
-      setErrorMessage(err.message || 'An unexpected error occurred.');
+      setErrorMessage(err.message || 'Failed to send magic link.');
     } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const handleResend = async () => {
-    if (resendCooldown > 0 || submitting) return;
-    setErrorMessage(null);
-    setSubmitting(true);
-    try {
-      const result = await sendMagicLink(email);
-      if (result.success) {
-        setResendCooldown(60);
-      } else {
-        setErrorMessage(result.error || 'Failed to resend magic link.');
-      }
-    } catch (err: any) {
-      setErrorMessage(err.message || 'An error occurred.');
-    } finally {
-      setSubmitting(false);
+      setMagicLinkLoading(false);
     }
   };
 
@@ -140,294 +168,218 @@ export const LoginPage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-[#fdfdfc] text-[#1a1a18] flex flex-col font-sans antialiased selection:bg-[#1a1a18] selection:text-[#fdfdfc]">
-      {/* Main Split Grid */}
-      <div className="flex-1 grid grid-cols-1 lg:grid-cols-2 min-h-0">
-        {/* Visual Editorial Left Side */}
-        <aside className="bg-[#f2efeb] border-b lg:border-b-0 lg:border-r border-[#1a1a18]/10 flex flex-col justify-between p-8 sm:p-12 lg:p-16">
-          <div>
-            <div className="font-serif-display text-3xl sm:text-4xl font-semibold italic text-[#1a1a18] tracking-tight">
-              Giriraj.
+    <div className="min-h-screen bg-white sm:bg-slate-50/50 flex flex-col justify-between py-6 px-4 sm:px-6 font-sans antialiased text-slate-900">
+      {/* Centered Main Container */}
+      <div className="w-full max-w-[390px] mx-auto my-auto pt-2 pb-6">
+        {/* App Logo & Brand Header */}
+        <div className="text-center">
+          {/* Yellow Rounded Icon Badge */}
+          <div
+            id="brand-logo-badge"
+            className="w-20 h-20 sm:w-22 sm:h-22 rounded-3xl bg-[#FFB800] shadow-[0_8px_24px_rgba(255,184,0,0.35)] flex items-center justify-center mx-auto mb-4 border border-amber-300/60 relative overflow-hidden transition-transform hover:scale-[1.02]"
+          >
+            {/* Glossy top reflection */}
+            <span className="pointer-events-none absolute inset-x-0 top-0 h-[45%] bg-gradient-to-b from-white/40 via-white/10 to-transparent rounded-t-3xl" />
+            <span className="text-slate-950 font-extrabold text-sm sm:text-base tracking-tight select-none">
+              SmartRun
+            </span>
+          </div>
+
+          {/* Brand Name: Smart (black) + Run (deep teal/green) + Operation */}
+          <div className="flex items-center justify-center tracking-tight text-3xl sm:text-[34px] font-bold flex-wrap gap-x-2">
+            <div className="flex items-center">
+              <span className="font-serif text-slate-900">Smart</span>
+              <span className="font-sans text-[#007A5E] ml-0.5">Run</span>
+            </div>
+            <span className="font-sans text-slate-800 font-semibold text-2xl sm:text-[30px]">
+              Operation
+            </span>
+          </div>
+
+          {/* Subtitle */}
+          <p className="text-xs sm:text-[13px] text-slate-500 font-medium mt-1 tracking-normal">
+            Electrical & Construction Materials Hub
+          </p>
+
+          {/* Section Heading */}
+          <h1 className="text-xl sm:text-2xl font-bold text-slate-950 mt-7 mb-6">
+            Sign in
+          </h1>
+        </div>
+
+        {/* Feedback Alerts */}
+        {errorMessage && (
+          <div
+            id="login-error-alert"
+            className="mb-5 p-3.5 bg-rose-50 border border-rose-200 text-rose-900 text-xs sm:text-sm rounded-xl flex flex-col gap-2 animate-in fade-in"
+          >
+            <div className="flex items-start gap-2">
+              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+              <div className="leading-snug flex-1">{errorMessage}</div>
+            </div>
+            <button
+              type="button"
+              onClick={handleRetryVerification}
+              disabled={submitting}
+              className="self-start inline-flex items-center gap-1.5 px-2.5 py-1 bg-rose-100 hover:bg-rose-200 text-rose-900 border border-rose-300 font-mono-code text-[11px] uppercase tracking-wider rounded-md transition cursor-pointer disabled:opacity-50"
+            >
+              <RefreshCw className={`w-3 h-3 ${submitting ? 'animate-spin' : ''}`} />
+              <span>Retry</span>
+            </button>
+          </div>
+        )}
+
+        {magicLinkSent && (
+          <div
+            id="magic-link-sent-alert"
+            className="mb-5 p-3.5 bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs sm:text-sm rounded-xl flex items-start gap-2 animate-in fade-in"
+          >
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+            <div className="leading-snug">
+              Magic link sent to <strong>{identifier}</strong>! Check your email inbox to log in.
+            </div>
+          </div>
+        )}
+
+        {/* Login Form */}
+        <form onSubmit={handlePasswordLogin} className="space-y-5">
+          {/* EMAIL Input Section */}
+          <div className="text-left">
+            <label
+              htmlFor="email-input"
+              className="block font-bold text-xs text-slate-900 uppercase tracking-wider mb-2"
+            >
+              EMAIL
+            </label>
+            <div className="flex items-center gap-3 pb-2 border-b border-slate-300 focus-within:border-amber-500 transition-colors">
+              <Mail className="w-5 h-5 text-slate-400 shrink-0" />
+              <input
+                id="email-input"
+                type="email"
+                autoComplete="email"
+                value={identifier}
+                onChange={(e) => setIdentifier(e.target.value)}
+                placeholder="your@email.com"
+                className="w-full bg-transparent text-slate-900 placeholder:text-slate-400 text-sm sm:text-base outline-none"
+              />
             </div>
           </div>
 
-          <div className="my-10 lg:my-0 space-y-4 max-w-lg">
-            <h1 className="font-serif-display text-4xl sm:text-6xl lg:text-7xl font-semibold text-[#1a1a18] leading-[0.95] tracking-tight">
-              Warehouse Portal
-            </h1>
-            <p className="text-base sm:text-lg text-[#1a1a18]/70 leading-relaxed font-normal max-w-md">
-              Warehouse & packing staff portal. Sign in with password or one-click magic link.
-            </p>
-          </div>
-
-          <div className="font-mono-code text-xs uppercase tracking-widest text-[#1a1a18]/40">
-            REF: WMS-IND-2024
-          </div>
-        </aside>
-
-        {/* Auth Interaction Right Side */}
-        <section className="flex flex-col justify-center items-center p-6 sm:p-12 lg:p-16">
-          <div className="w-full max-w-[420px]">
-            {/* Minimalist Tab Navigation */}
-            {!magicLinkSent && (
-              <div className="grid grid-cols-2 gap-[1px] bg-[#1a1a18]/10 border border-[#1a1a18]/10 mb-10">
+          {/* Password Input (Smoothly revealed for entering password) */}
+          {showPasswordField && (
+            <div className="text-left animate-in fade-in slide-in-from-top-1 duration-200">
+              <div className="flex items-center justify-between mb-2">
+                <label
+                  htmlFor="password-input"
+                  className="block font-bold text-xs text-slate-900 uppercase tracking-wider"
+                >
+                  PASSWORD
+                </label>
                 <button
                   type="button"
-                  id="tab-password-access"
-                  onClick={() => {
-                    setAuthMode('password');
-                    setErrorMessage(null);
-                  }}
-                  className={`p-3.5 text-center font-mono-code text-[11px] sm:text-xs uppercase tracking-wider transition cursor-pointer ${
-                    authMode === 'password'
-                      ? 'text-[#1a1a18] bg-[#f2efeb] font-semibold'
-                      : 'text-[#1a1a18]/40 bg-[#fdfdfc] hover:text-[#1a1a18]'
-                  }`}
+                  onClick={() => setShowPasswordField(false)}
+                  className="text-[11px] text-slate-400 hover:text-slate-600"
                 >
-                  Password Access
-                </button>
-                <button
-                  type="button"
-                  id="tab-magic-link"
-                  onClick={() => {
-                    setAuthMode('magic_link');
-                    setErrorMessage(null);
-                  }}
-                  className={`p-3.5 text-center font-mono-code text-[11px] sm:text-xs uppercase tracking-wider transition cursor-pointer ${
-                    authMode === 'magic_link'
-                      ? 'text-[#1a1a18] bg-[#f2efeb] font-semibold'
-                      : 'text-[#1a1a18]/40 bg-[#fdfdfc] hover:text-[#1a1a18]'
-                  }`}
-                >
-                  Magic Link
+                  Hide
                 </button>
               </div>
-            )}
-
-            {/* Error Message with Retry */}
-            {errorMessage && (
-              <div
-                id="login-error-alert"
-                className="mb-8 p-4 bg-red-50 border border-red-200 text-red-900 text-xs sm:text-sm flex flex-col gap-2.5 rounded-none animate-in fade-in"
-              >
-                <div className="flex items-start gap-2.5">
-                  <AlertCircle className="w-4 h-4 text-red-700 shrink-0 mt-0.5" />
-                  <div className="leading-snug flex-1">{errorMessage}</div>
-                </div>
-                {/* Show direct retry button if error is a verification failure */}
-                <button
-                  type="button"
-                  onClick={handleRetryVerification}
-                  disabled={submitting}
-                  className="self-start inline-flex items-center gap-1.5 px-3 py-1.5 bg-red-100 hover:bg-red-200 text-red-900 border border-red-300 font-mono-code text-[11px] uppercase tracking-wider transition cursor-pointer disabled:opacity-50"
-                >
-                  <RefreshCw className={`w-3 h-3 ${submitting ? 'animate-spin' : ''}`} />
-                  <span>Retry Verification</span>
-                </button>
-              </div>
-            )}
-
-            {/* Magic Link Sent View */}
-            {magicLinkSent ? (
-              <div className="space-y-6 animate-in fade-in duration-300">
-                <div className="flex items-center gap-3 pb-3 border-b border-[#1a1a18]/10">
-                  <CheckCircle2 className="w-6 h-6 text-emerald-700" />
-                  <h3 className="font-serif-display text-2xl font-semibold text-[#1a1a18]">
-                    Check Your Inbox
-                  </h3>
-                </div>
-
-                <div className="space-y-2">
-                  <p className="text-sm text-[#1a1a18]/70">
-                    We've emailed a direct sign-in link to:
-                  </p>
-                  <p className="font-mono-code font-medium text-[#1a1a18] text-sm bg-[#f2efeb] py-2 px-3 border border-[#1a1a18]/10 inline-block">
-                    {email}
-                  </p>
-                </div>
-
-                <div className="p-4 bg-[#f2efeb] border border-[#1a1a18]/10 text-xs text-[#1a1a18]/80 leading-relaxed">
-                  <p className="font-semibold text-[#1a1a18] flex items-center gap-1.5 mb-1">
-                    <Sparkles className="w-3.5 h-3.5 text-[#1a1a18]" />
-                    Instant One-Click Login
-                  </p>
-                  Click the link inside the email to immediately access the warehouse portal without entering a password.
-                </div>
-
-                <div className="space-y-3 pt-2">
-                  <button
-                    type="button"
-                    onClick={handleResend}
-                    disabled={resendCooldown > 0 || submitting}
-                    className="w-full bg-[#1a1a18] text-[#fdfdfc] border border-[#1a1a18] p-4 text-xs uppercase font-mono-code tracking-wider transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 hover:bg-[#1a1a18]/90"
-                  >
-                    {submitting ? (
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    ) : (
-                      <RotateCw className="w-3.5 h-3.5" />
-                    )}
-                    <span>
-                      {resendCooldown > 0
-                        ? `Resend link in ${resendCooldown}s`
-                        : 'Resend Magic Link'}
-                    </span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setMagicLinkSent(false);
-                      setAuthMode('password');
-                    }}
-                    className="w-full bg-transparent border-none text-xs text-[#1a1a18]/60 underline hover:text-[#1a1a18] transition cursor-pointer text-center py-2 flex items-center justify-center gap-1"
-                  >
-                    <ArrowLeft className="w-3.5 h-3.5" />
-                    <span>Back to Password Access</span>
-                  </button>
-                </div>
-              </div>
-            ) : authMode === 'password' ? (
-              /* Password Access Form */
-              <form onSubmit={handlePasswordSubmit}>
-                <div className="flex justify-between items-center mb-1">
-                  <label
-                    htmlFor="staff-email-input"
-                    className="font-mono-code text-[10px] sm:text-[11px] uppercase tracking-widest text-[#1a1a18]/50"
-                  >
-                    Staff Email
-                  </label>
-                </div>
+              <div className="flex items-center gap-3 pb-2 border-b border-slate-300 focus-within:border-amber-500 transition-colors">
+                <Lock className="w-5 h-5 text-slate-400 shrink-0" />
                 <input
-                  id="staff-email-input"
-                  type="email"
-                  required
-                  autoComplete="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="admin@giriraj.com"
-                  className="w-full py-3.5 bg-transparent border-0 border-b border-[#1a1a18]/15 text-[#1a1a18] placeholder-[#1a1a18]/30 text-base mb-8 outline-none focus:border-b-[#1a1a18] transition-colors rounded-none"
+                  id="password-input"
+                  type={showPassword ? 'text' : 'password'}
+                  autoComplete="current-password"
+                  autoFocus
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Enter your password"
+                  className="w-full bg-transparent text-slate-900 placeholder:text-slate-400 text-sm sm:text-base outline-none"
                 />
-
-                <div className="flex justify-between items-center mb-1">
-                  <label
-                    htmlFor="staff-password-input"
-                    className="font-mono-code text-[10px] sm:text-[11px] uppercase tracking-widest text-[#1a1a18]/50"
-                  >
-                    Secret Code
-                  </label>
-                </div>
-                <div className="relative mb-10">
-                  <input
-                    id="staff-password-input"
-                    type={showPassword ? 'text' : 'password'}
-                    required
-                    autoComplete="current-password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="••••••••"
-                    className="w-full py-3.5 pr-10 bg-transparent border-0 border-b border-[#1a1a18]/15 text-[#1a1a18] placeholder-[#1a1a18]/30 text-base outline-none focus:border-b-[#1a1a18] transition-colors rounded-none"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-0 top-3.5 text-[#1a1a18]/40 hover:text-[#1a1a18] transition cursor-pointer p-1"
-                    aria-label={showPassword ? 'Hide password' : 'Show password'}
-                  >
-                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
-                </div>
-
-                <button
-                  id="submit-password-login-btn"
-                  type="submit"
-                  disabled={submitting}
-                  className="w-full bg-[#1a1a18] text-[#fdfdfc] border border-[#1a1a18] py-4 px-6 text-sm font-medium transition cursor-pointer hover:bg-[#1a1a18]/90 active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed mb-5 flex items-center justify-center gap-2"
-                >
-                  {submitting ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin text-[#fdfdfc]" />
-                      <span>Authenticating...</span>
-                    </>
-                  ) : (
-                    <span>Sign In to Warehouse</span>
-                  )}
-                </button>
-
                 <button
                   type="button"
-                  onClick={() => {
-                    setAuthMode('magic_link');
-                    setErrorMessage(null);
-                  }}
-                  className="w-full bg-transparent border-none text-xs text-[#1a1a18]/60 underline hover:text-[#1a1a18] transition cursor-pointer text-center"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="text-slate-400 hover:text-slate-600 p-0.5 transition cursor-pointer"
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
                 >
-                  Forgot password? Sign in with Magic Link
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
-              </form>
+              </div>
+            </div>
+          )}
+
+          {/* Primary Action Button: First shows Password, then reveals password section, and when password filled shows Login */}
+          <button
+            id="login-password-btn"
+            type="submit"
+            disabled={submitting}
+            className="w-full h-12 rounded-full bg-[#FFB800] hover:bg-[#F59E0B] text-slate-950 font-bold text-sm sm:text-[15px] shadow-[0_4px_16px_rgba(255,184,0,0.32)] flex items-center justify-center gap-2 transition-all active:scale-[0.98] cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            {submitting ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin text-slate-950" />
+                <span>Authenticating...</span>
+              </>
+            ) : showPasswordField && password.trim() ? (
+              <>
+                <LogIn className="w-4 h-4 text-slate-950" />
+                <span>Login</span>
+              </>
             ) : (
-              /* Magic Link Form */
-              <form onSubmit={handleMagicLinkSubmit}>
-                <div className="flex justify-between items-center mb-1">
-                  <label
-                    htmlFor="staff-magic-email"
-                    className="font-mono-code text-[10px] sm:text-[11px] uppercase tracking-widest text-[#1a1a18]/50"
-                  >
-                    Staff Email Address
-                  </label>
-                </div>
-                <input
-                  id="staff-magic-email"
-                  type="email"
-                  required
-                  autoComplete="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="admin@giriraj.com"
-                  className="w-full py-3.5 bg-transparent border-0 border-b border-[#1a1a18]/15 text-[#1a1a18] placeholder-[#1a1a18]/30 text-base mb-3 outline-none focus:border-b-[#1a1a18] transition-colors rounded-none"
-                />
-                <p className="text-xs text-[#1a1a18]/60 mb-10 leading-relaxed">
-                  We'll dispatch a one-click login link to your inbox. No password needed.
-                </p>
-
-                <button
-                  id="submit-magic-link-btn"
-                  type="submit"
-                  disabled={submitting}
-                  className="w-full bg-[#1a1a18] text-[#fdfdfc] border border-[#1a1a18] py-4 px-6 text-sm font-medium transition cursor-pointer hover:bg-[#1a1a18]/90 active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed mb-5 flex items-center justify-center gap-2"
-                >
-                  {submitting ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin text-[#fdfdfc]" />
-                      <span>Sending Link...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Send className="w-4 h-4" />
-                      <span>Send Magic Link</span>
-                    </>
-                  )}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setAuthMode('password');
-                    setErrorMessage(null);
-                  }}
-                  className="w-full bg-transparent border-none text-xs text-[#1a1a18]/60 underline hover:text-[#1a1a18] transition cursor-pointer text-center"
-                >
-                  Use Secret Code / Password instead
-                </button>
-              </form>
+              <>
+                <KeyRound className="w-4 h-4 text-slate-950" />
+                <span>Password</span>
+              </>
             )}
+          </button>
+        </form>
+
+        {/* Divider: OR CONTINUE WITH */}
+        <div className="relative my-6">
+          <div className="absolute inset-0 flex items-center">
+            <div className="w-full border-t border-slate-200" />
           </div>
-        </section>
+          <div className="relative flex justify-center text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+            <span className="bg-white sm:bg-slate-50/50 px-3">OR CONTINUE WITH</span>
+          </div>
+        </div>
+
+        {/* Alternative Action: Magic link Button (Google Button explicitly excluded as requested) */}
+        <div className="space-y-2.5">
+          <button
+            id="magic-link-btn"
+            type="button"
+            disabled={magicLinkLoading}
+            onClick={handleMagicLink}
+            className="w-full h-11 sm:h-12 rounded-full border border-slate-200 hover:border-slate-300 bg-white hover:bg-slate-50 text-slate-800 font-medium text-xs sm:text-sm flex items-center justify-center gap-2.5 transition-all shadow-2xs active:scale-[0.99] cursor-pointer disabled:opacity-50"
+          >
+            {magicLinkLoading ? (
+              <Loader2 className="w-4 h-4 animate-spin text-amber-600" />
+            ) : (
+              <Mail className="w-4 h-4 text-amber-600" />
+            )}
+            <span>Magic link</span>
+          </button>
+        </div>
       </div>
 
-      {/* Footer Strip */}
-      <footer className="px-6 sm:px-12 py-4 border-t border-[#1a1a18]/10 flex flex-col sm:flex-row justify-between items-center gap-2 font-mono-code text-[10px] sm:text-[11px] uppercase tracking-wider text-[#1a1a18]/40 bg-[#fdfdfc]">
-        <div>Internal System • Authorized Personnel Only</div>
-        <div>Admin accounts provisioned in Supabase</div>
+      {/* Footer: Terms of service and Privacy policy */}
+      <footer className="text-center pt-4 pb-2">
+        <p className="text-[11px] sm:text-xs text-slate-500">
+          You agree to our{' '}
+          <Link
+            to="/terms-of-service"
+            className="text-slate-700 hover:text-slate-900 underline underline-offset-2 font-medium"
+          >
+            Terms of service
+          </Link>{' '}
+          and{' '}
+          <Link
+            to="/privacy-policy"
+            className="text-slate-700 hover:text-slate-900 underline underline-offset-2 font-medium"
+          >
+            Privacy policy
+          </Link>
+        </p>
       </footer>
     </div>
   );

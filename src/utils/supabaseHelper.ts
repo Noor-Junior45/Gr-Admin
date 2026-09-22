@@ -30,8 +30,16 @@ export async function withSkewRetry<T = any>(
       return res as { data: T | null; error: any; count?: number | null };
     } catch (err: any) {
       lastError = err;
-      if (attempt < maxRetries) {
-        const delay = baseDelayMs * Math.pow(1.5, attempt);
+      const isFetchFailure =
+        err?.message?.includes('Failed to fetch') ||
+        err?.name === 'TypeError' ||
+        err?.message?.includes('NetworkError');
+
+      // For network fetch errors, retry at most once with small delay to avoid blocking
+      const retriesForThisError = isFetchFailure ? 1 : maxRetries;
+
+      if (attempt < retriesForThisError) {
+        const delay = isFetchFailure ? 200 : baseDelayMs * Math.pow(1.5, attempt);
         await new Promise((resolve) => setTimeout(resolve, delay));
         continue;
       }

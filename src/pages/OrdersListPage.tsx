@@ -1,8 +1,14 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import { Order, OrderStatus } from '../types';
-import { fetchOrdersList } from '../services/orderService';
+import {
+  fetchOrdersList,
+  updateOrderStatus,
+  cancelOrderRPC,
+  fetchOrderStatusCounts,
+  OrderStatusCounts,
+} from '../services/orderService';
 import {
   formatCurrency,
   formatDateTime,
@@ -19,13 +25,108 @@ import {
   Loader2,
   ShoppingBag,
   User,
+  XCircle,
+  Box,
+  Truck,
+  Bike,
 } from 'lucide-react';
+import { PackingQueuePage } from './PackingQueuePage';
+import { ReadyOrdersPage } from './ReadyOrdersPage';
+import { DispatchBoardPage } from './DispatchBoardPage';
 
 const PENDING_ONLY_STATUSES: OrderStatus[] = ['pending'];
 const PAGE_SIZE = 30;
 
-export const OrdersListPage: React.FC = () => {
+export interface OrdersListPageProps {
+  defaultTab?: 'order' | 'packing' | 'packed' | 'dispatch';
+}
+
+export const OrdersListPage: React.FC<OrdersListPageProps> = ({ defaultTab }) => {
   const navigate = useNavigate();
+  const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // Resolve active tab from props, pathname, or query parameters
+  const resolveCurrentTab = useCallback((): 'order' | 'packing' | 'packed' | 'dispatch' => {
+    if (defaultTab) return defaultTab;
+    if (location.pathname === '/packing') return 'packing';
+    if (
+      location.pathname === '/ready' ||
+      location.pathname === '/orders/ready' ||
+      location.pathname === '/orders/packed' ||
+      location.pathname === '/packed'
+    ) {
+      return 'packed';
+    }
+    if (location.pathname === '/dispatch' || location.pathname === '/dispatched') return 'dispatch';
+    const tabParam = searchParams.get('tab');
+    if (tabParam === 'packing') return 'packing';
+    if (tabParam === 'packed' || tabParam === 'ready') return 'packed';
+    if (tabParam === 'dispatch') return 'dispatch';
+    return 'order';
+  }, [defaultTab, location.pathname, searchParams]);
+
+  const [activeTab, setActiveTab] = useState<'order' | 'packing' | 'packed' | 'dispatch'>(resolveCurrentTab);
+
+  // Sync tab state whenever URL pathname or search params update
+  useEffect(() => {
+    setActiveTab(resolveCurrentTab());
+  }, [resolveCurrentTab]);
+
+  const handleTabChange = (tab: 'order' | 'packing' | 'packed' | 'dispatch') => {
+    setActiveTab(tab);
+    if (tab === 'order') {
+      navigate('/orders', { replace: true });
+    } else if (tab === 'packing') {
+      navigate('/packing', { replace: true });
+    } else if (tab === 'packed') {
+      navigate('/ready', { replace: true });
+    } else if (tab === 'dispatch') {
+      navigate('/dispatch', { replace: true });
+    }
+  };
+
+  // Real-time stage counts for minimal badges
+  const [counts, setCounts] = useState<OrderStatusCounts>({
+    all: 0,
+    pending: 0,
+    packing: 0,
+    packed: 0,
+    shipped: 0,
+    delivered: 0,
+    cancelled: 0,
+  });
+
+  const loadCounts = useCallback(async () => {
+    try {
+      const c = await fetchOrderStatusCounts();
+      setCounts(c);
+    } catch (err) {
+      console.warn('Failed to load status counts in top nav:', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadCounts();
+
+    const channel = supabase
+      .channel('top_nav_order_counts_sync')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'orders' },
+        () => loadCounts()
+      )
+      .subscribe();
+
+    const interval = setInterval(loadCounts, 30000);
+
+    return () => {
+      supabase.removeChannel(channel);
+      clearInterval(interval);
+    };
+  }, [loadCounts]);
+
+  // Pending Orders State (Order Tab)
   const [orders, setOrders] = useState<Order[]>([]);
   const [totalCount, setTotalCount] = useState<number>(0);
   const [loading, setLoading] = useState<boolean>(true);
@@ -34,6 +135,7 @@ export const OrdersListPage: React.FC = () => {
   const [hasMore, setHasMore] = useState<boolean>(true);
   const [page, setPage] = useState<number>(1);
   const [error, setError] = useState<string | null>(null);
+  const [processingId, setProcessingId] = useState<string | null>(null);
 
   const observerRef = useRef<HTMLDivElement | null>(null);
 
@@ -93,6 +195,45 @@ export const OrdersListPage: React.FC = () => {
     };
   }, [loadInitialOrders]);
 
+  const handleAcceptOrder = async (orderId: string) => {
+    setProcessingId(orderId);
+    try {
+      await updateOrderStatus(orderId, 'packing');
+      setOrders((prev) => prev.filter((o) => o.id !== orderId));
+      setTotalCount((prev) => Math.max(0, prev - 1));
+      setCounts((prev) => ({
+        ...prev,
+        pending: Math.max(0, prev.pending - 1),
+        packing: prev.packing + 1,
+      }));
+    } catch (err: any) {
+      alert(err.message || 'Failed to accept order.');
+    } finally {
+      setProcessingId(null);
+    }
+  };
+
+  const handleCancelOrder = async (orderId: string, orderShortId: string) => {
+    const confirmCancel = window.confirm(`Are you sure you want to cancel order #${orderShortId}? Items will be restocked to inventory.`);
+    if (!confirmCancel) return;
+
+    setProcessingId(orderId);
+    try {
+      await cancelOrderRPC(orderId, 'Cancelled by store operator');
+      setOrders((prev) => prev.filter((o) => o.id !== orderId));
+      setTotalCount((prev) => Math.max(0, prev - 1));
+      setCounts((prev) => ({
+        ...prev,
+        pending: Math.max(0, prev.pending - 1),
+        cancelled: prev.cancelled + 1,
+      }));
+    } catch (err: any) {
+      alert(err.message || 'Failed to cancel order.');
+    } finally {
+      setProcessingId(null);
+    }
+  };
+
   // Infinite scroll loader: loads next pages as user scrolls
   const loadMoreOrders = useCallback(async () => {
     if (loadingMore || !hasMore || loading) return;
@@ -150,6 +291,157 @@ export const OrdersListPage: React.FC = () => {
 
   return (
     <div className="space-y-4">
+      {/* Top Navbar: 4 Minimal Buttons (Order, Packing, Packed, Dispatch) */}
+      <div className="w-full flex items-center justify-between gap-3 pb-1 border-b border-slate-200/80">
+        <div
+          id="orders-top-navbar"
+          role="tablist"
+          aria-label="Order stages navigation"
+          className="w-full sm:w-auto flex items-center p-1 bg-slate-100/90 backdrop-blur-md rounded-2xl border border-slate-200/80 shadow-2xs gap-0.5 sm:gap-1.5"
+        >
+          {/* 1st: Order [Where new order received will appear] */}
+          <button
+            type="button"
+            id="top-nav-btn-order"
+            role="tab"
+            aria-selected={activeTab === 'order'}
+            onClick={() => handleTabChange('order')}
+            className={`flex-1 sm:flex-initial flex items-center justify-center gap-1 sm:gap-2 px-2 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all duration-150 cursor-pointer select-none ${
+              activeTab === 'order'
+                ? 'bg-white text-slate-900 shadow-xs border border-slate-200/70'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+            }`}
+            title="Order - Pending Review"
+          >
+            <Clock
+              className={`w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0 ${
+                activeTab === 'order' ? 'text-amber-500' : 'text-slate-400'
+              }`}
+            />
+            <span className="hidden sm:inline">Order</span>
+            {counts.pending > 0 && (
+              <span
+                className={`px-1.5 py-0.2 rounded-full text-[10px] sm:text-xs font-mono-code font-bold ${
+                  activeTab === 'order'
+                    ? 'bg-amber-100 text-amber-800'
+                    : 'bg-slate-200 text-slate-600'
+                }`}
+              >
+                {counts.pending}
+              </span>
+            )}
+          </button>
+
+          {/* 2nd: Packing [Packing order will appear] */}
+          <button
+            type="button"
+            id="top-nav-btn-packing"
+            role="tab"
+            aria-selected={activeTab === 'packing'}
+            onClick={() => handleTabChange('packing')}
+            className={`flex-1 sm:flex-initial flex items-center justify-center gap-1 sm:gap-2 px-2 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all duration-150 cursor-pointer select-none ${
+              activeTab === 'packing'
+                ? 'bg-white text-slate-900 shadow-xs border border-slate-200/70'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+            }`}
+            title="Packing Queue"
+          >
+            <Box
+              className={`w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0 ${
+                activeTab === 'packing' ? 'text-blue-500' : 'text-slate-400'
+              }`}
+            />
+            <span className="hidden sm:inline">Packing</span>
+            {counts.packing > 0 && (
+              <span
+                className={`px-1.5 py-0.2 rounded-full text-[10px] sm:text-xs font-mono-code font-bold ${
+                  activeTab === 'packing'
+                    ? 'bg-blue-100 text-blue-800'
+                    : 'bg-slate-200 text-slate-600'
+                }`}
+              >
+                {counts.packing}
+              </span>
+            )}
+          </button>
+
+          {/* 3rd: Packed [Ready for Rider - Between Packing and Dispatch] */}
+          <button
+            type="button"
+            id="top-nav-btn-packed"
+            role="tab"
+            aria-selected={activeTab === 'packed'}
+            onClick={() => handleTabChange('packed')}
+            className={`flex-1 sm:flex-initial flex items-center justify-center gap-1 sm:gap-2 px-2 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all duration-150 cursor-pointer select-none ${
+              activeTab === 'packed'
+                ? 'bg-white text-slate-900 shadow-xs border border-slate-200/70'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+            }`}
+            title="Packed - Ready for Rider"
+          >
+            <Bike
+              className={`w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0 ${
+                activeTab === 'packed' ? 'text-teal-600' : 'text-slate-400'
+              }`}
+            />
+            <span className="hidden sm:inline">Packed</span>
+            {counts.packed > 0 && (
+              <span
+                className={`px-1.5 py-0.2 rounded-full text-[10px] sm:text-xs font-mono-code font-bold ${
+                  activeTab === 'packed'
+                    ? 'bg-teal-100 text-teal-800'
+                    : 'bg-slate-200 text-slate-600'
+                }`}
+              >
+                {counts.packed}
+              </span>
+            )}
+          </button>
+
+          {/* 4th: Dispatch [items which left warehouse will shown] */}
+          <button
+            type="button"
+            id="top-nav-btn-dispatch"
+            role="tab"
+            aria-selected={activeTab === 'dispatch'}
+            onClick={() => handleTabChange('dispatch')}
+            className={`flex-1 sm:flex-initial flex items-center justify-center gap-1 sm:gap-2 px-2 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all duration-150 cursor-pointer select-none ${
+              activeTab === 'dispatch'
+                ? 'bg-white text-slate-900 shadow-xs border border-slate-200/70'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+            }`}
+            title="Dispatch - Out for Delivery"
+          >
+            <Truck
+              className={`w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0 ${
+                activeTab === 'dispatch' ? 'text-emerald-500' : 'text-slate-400'
+              }`}
+            />
+            <span className="hidden sm:inline">Dispatch</span>
+            {counts.shipped > 0 && (
+              <span
+                className={`px-1.5 py-0.2 rounded-full text-[10px] sm:text-xs font-mono-code font-bold ${
+                  activeTab === 'dispatch'
+                    ? 'bg-emerald-100 text-emerald-800'
+                    : 'bg-slate-200 text-slate-600'
+                }`}
+              >
+                {counts.shipped}
+              </span>
+            )}
+          </button>
+        </div>
+      </div>
+
+      {/* Dynamic Views: Packing, Packed, Dispatch, or Order */}
+      {activeTab === 'packing' && <PackingQueuePage />}
+
+      {activeTab === 'packed' && <ReadyOrdersPage />}
+
+      {activeTab === 'dispatch' && <DispatchBoardPage />}
+
+      {activeTab === 'order' && (
+        <div className="space-y-4">
       {/* Error Banner */}
       {error && (
         <div className="p-3.5 bg-rose-50 border border-rose-200 text-rose-800 text-xs sm:text-sm rounded-xl flex items-start gap-2.5">
@@ -243,73 +535,77 @@ export const OrdersListPage: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Customer Info */}
-                  <div className="space-y-1 text-xs">
-                    <div className="flex items-center gap-1.5 font-bold text-slate-900">
-                      <User className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                      <span className="truncate">{order.recipient_name}</span>
-                    </div>
-
-                    <div className="flex items-center gap-1.5 text-slate-600 font-mono-code text-[11px]">
-                      <Phone className="w-3 h-3 text-slate-400 shrink-0" />
-                      <a href={`tel:${order.recipient_phone}`} className="hover:underline hover:text-slate-900">
-                        {order.recipient_phone}
-                      </a>
-                    </div>
-
-                    <div className="flex items-start gap-1.5 text-slate-500 text-[11px]">
-                      <MapPin className="w-3 h-3 text-slate-400 shrink-0 mt-0.5" />
-                      <span className="line-clamp-2">
-                        {order.address_line1}, {order.city} - {order.pincode}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Order Items Preview */}
-                  <div className="bg-slate-50 rounded-lg p-2 space-y-1 border border-slate-100">
-                    <div className="flex items-center justify-between text-[11px] font-semibold text-slate-700">
-                      <span className="flex items-center gap-1">
-                        <ShoppingBag className="w-3 h-3 text-slate-400" />
+                  {/* Order Items Details (Customer info is hidden from outside of page) */}
+                  <Link
+                    to={`/orders/${order.id}`}
+                    className="block bg-slate-50 hover:bg-slate-100/90 transition-colors rounded-xl p-3 border border-slate-200/80 group"
+                    title="View item and order details"
+                  >
+                    <div className="flex items-center justify-between text-xs font-semibold text-slate-700 mb-2">
+                      <span className="flex items-center gap-1.5 font-bold text-slate-900">
+                        <ShoppingBag className="w-3.5 h-3.5 text-amber-500" />
                         Items ({order.item_count || items.length})
                       </span>
+                      <span className="text-[11px] text-amber-600 font-medium group-hover:underline">
+                        View details &rarr;
+                      </span>
                     </div>
 
-                    <div className="space-y-1 max-h-20 overflow-y-auto custom-scrollbar pr-1">
+                    <div className="space-y-1.5 max-h-32 overflow-y-auto custom-scrollbar pr-1">
                       {items.length > 0 ? (
                         items.map((it) => (
-                          <div key={it.id} className="flex items-center justify-between text-xs text-slate-600">
-                            <span className="truncate font-medium">
-                              {it.quantity}x {it.product_name}
+                          <div key={it.id} className="flex items-center justify-between text-xs text-slate-700 py-0.5 border-b border-slate-100 last:border-0">
+                            <span className="truncate font-medium flex items-center gap-1.5">
+                              <span className="font-mono-code text-[11px] font-bold px-1.5 py-0.2 rounded bg-amber-100 text-amber-900">
+                                {it.quantity}x
+                              </span>
+                              <span className="truncate">{it.product_name}</span>
                             </span>
-                            <span className="font-mono-code text-[11px] text-slate-500 shrink-0 ml-2">
+                            <span className="font-mono-code text-[11px] font-semibold text-slate-600 shrink-0 ml-2">
                               {formatCurrency(it.price_at_purchase * it.quantity)}
                             </span>
                           </div>
                         ))
                       ) : (
-                        <div className="text-[11px] text-slate-400 italic">No item breakdown available</div>
+                        <div className="text-xs text-slate-400 italic py-1">No item breakdown available</div>
                       )}
                     </div>
-                  </div>
+                  </Link>
                 </div>
 
-                {/* Center Long Red Liquid Apple Glassmorphism Pending Button */}
-                <div className="mt-2.5 pt-2.5 border-t border-slate-100 flex items-center justify-center w-full">
-                  <Link
-                    to={`/orders/${order.id}`}
-                    id={`btn-pending-action-${order.id}`}
-                    className="w-full sm:w-[94%] relative overflow-hidden flex items-center justify-center gap-2 py-2.5 px-6 rounded-2xl font-bold text-xs sm:text-sm text-white tracking-wider uppercase shadow-[0_8px_20px_-3px_rgba(239,68,68,0.45),inset_0_1px_1.5px_0_rgba(255,255,255,0.55),inset_0_-2px_4px_0_rgba(0,0,0,0.2)] bg-gradient-to-r from-red-600 via-rose-600 to-red-600 backdrop-blur-xl border border-white/35 cursor-pointer select-none"
-                    title="View pending order details"
+                {/* Action Buttons: Divided in two equal parts (Left: Cancel, Right: Accept) */}
+                <div className="mt-3 pt-2.5 border-t border-slate-100 grid grid-cols-2 gap-2.5 w-full">
+                  <button
+                    type="button"
+                    id={`btn-cancel-order-${order.id}`}
+                    onClick={() => handleCancelOrder(order.id, formatShortId(order.id))}
+                    disabled={processingId === order.id}
+                    className="relative overflow-hidden flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl font-bold text-xs sm:text-sm text-rose-700 bg-rose-50 hover:bg-rose-100 active:bg-rose-200 border border-rose-200 transition shadow-2xs cursor-pointer select-none disabled:opacity-50 disabled:cursor-not-allowed"
+                    title="Cancel order"
                   >
-                    {/* Liquid Apple Glass Surface Sheen & Specular Reflection */}
-                    <div className="absolute inset-x-0 top-0 h-[48%] bg-gradient-to-b from-white/35 via-white/10 to-transparent pointer-events-none rounded-t-2xl" />
+                    {processingId === order.id ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-rose-600" />
+                    ) : (
+                      <XCircle className="w-3.5 h-3.5 text-rose-600" />
+                    )}
+                    <span>Cancel</span>
+                  </button>
 
-                    {/* Button Content */}
-                    <span className="relative z-10 flex items-center justify-center gap-2 drop-shadow-xs">
-                      <span className="w-2 h-2 rounded-full bg-white shadow-[0_0_8px_rgba(255,255,255,0.95)] animate-pulse" />
-                      <span>Pending</span>
-                    </span>
-                  </Link>
+                  <button
+                    type="button"
+                    id={`btn-accept-order-${order.id}`}
+                    onClick={() => handleAcceptOrder(order.id)}
+                    disabled={processingId === order.id}
+                    className="relative overflow-hidden flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl font-bold text-xs sm:text-sm text-white bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 border border-emerald-500 transition shadow-[0_2px_8px_rgba(16,185,129,0.3)] cursor-pointer select-none disabled:opacity-50 disabled:cursor-not-allowed"
+                    title="Accept order and move to Packing"
+                  >
+                    {processingId === order.id ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-white" />
+                    ) : (
+                      <CheckCircle2 className="w-3.5 h-3.5 text-white" />
+                    )}
+                    <span>Accept</span>
+                  </button>
                 </div>
               </div>
             );
@@ -326,6 +622,8 @@ export const OrdersListPage: React.FC = () => {
           </div>
         )}
       </div>
+        </div>
+      )}
     </div>
   );
 };

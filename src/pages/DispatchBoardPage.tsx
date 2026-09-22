@@ -14,13 +14,11 @@ import {
 } from '../utils/formatters';
 import {
   Clock,
-  Phone,
   ChevronRight,
   AlertCircle,
   Truck,
   Bike,
   MapPin,
-  User,
   ShoppingBag,
   RefreshCw,
 } from 'lucide-react';
@@ -261,28 +259,12 @@ export const DispatchBoardPage: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Customer Info */}
-                  <div className="space-y-1 text-xs">
-                    <div className="flex items-center gap-1.5 font-bold text-slate-900">
-                      <User className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                      <span className="truncate">{order.recipient_name || 'Customer'}</span>
-                    </div>
-
-                    <div className="flex items-center gap-1.5 text-slate-600 font-mono-code text-[11px]">
-                      <Phone className="w-3 h-3 text-slate-400 shrink-0" />
-                      <a
-                        href={`tel:${order.recipient_phone}`}
-                        onClick={(e) => e.stopPropagation()}
-                        className="hover:underline hover:text-slate-900"
-                      >
-                        {order.recipient_phone || 'N/A'}
-                      </a>
-                    </div>
-
-                    <div className="flex items-start gap-1.5 text-slate-500 text-[11px]">
-                      <MapPin className="w-3 h-3 text-slate-400 shrink-0 mt-0.5" />
-                      <span className="line-clamp-2">
-                        {[order.address_line1, order.city, order.pincode].filter(Boolean).join(', ')}
+                  {/* Delivery Address & Assigned Rider */}
+                  <div className="space-y-1.5 text-xs">
+                    <div className="flex items-start gap-1.5 text-slate-600 text-xs">
+                      <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0 mt-0.5" />
+                      <span className="break-words leading-relaxed">
+                        {[order.address_line1 || order.delivery_address, order.city, order.pincode].filter(Boolean).join(', ') || 'No address provided'}
                       </span>
                     </div>
 

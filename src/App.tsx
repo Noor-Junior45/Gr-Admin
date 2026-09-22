@@ -7,7 +7,6 @@ import { AdminLayout } from './components/AdminLayout';
 
 // Core Application Pages
 import { LoginPage } from './pages/LoginPage';
-import { DashboardPage } from './pages/DashboardPage';
 import { OrdersListPage } from './pages/OrdersListPage';
 import { PendingOrdersPage } from './pages/PendingOrdersPage';
 import { PackingQueuePage } from './pages/PackingQueuePage';
@@ -17,6 +16,7 @@ import { DeliveredOrdersPage } from './pages/DeliveredOrdersPage';
 import { CancelledOrdersPage } from './pages/CancelledOrdersPage';
 import { OrderDetailPage } from './pages/OrderDetailPage';
 import { DispatchBoardPage } from './pages/DispatchBoardPage';
+import { OrderHistoryPage } from './pages/OrderHistoryPage';
 import { DeliveryPartnersPage } from './pages/DeliveryPartnersPage';
 import { ProductsStockPage } from './pages/ProductsStockPage';
 import { ProfilePage } from './pages/ProfilePage';
@@ -36,13 +36,13 @@ export default function App() {
             <Route path="/login" element={<LoginPage />} />
 
             {/* Protected Operations Portal */}
-            {/* 1. Dashboard */}
+            {/* 1. Landing Page: Orders Queue */}
             <Route
               path="/"
               element={
                 <ProtectedRoute>
                   <AdminLayout>
-                    <DashboardPage />
+                    <OrdersListPage />
                   </AdminLayout>
                 </ProtectedRoute>
               }
@@ -60,6 +60,10 @@ export default function App() {
               }
             />
 
+            {/* Redirect legacy overview / dashboard routes to landing orders page */}
+            <Route path="/dashboard" element={<Navigate to="/" replace />} />
+            <Route path="/overview" element={<Navigate to="/" replace />} />
+
             {/* 3. Stage 1: Pending Review (Merged into /orders) */}
             <Route
               path="/pending"
@@ -76,7 +80,7 @@ export default function App() {
               element={
                 <ProtectedRoute>
                   <AdminLayout>
-                    <PackingQueuePage />
+                    <OrdersListPage defaultTab="packing" />
                   </AdminLayout>
                 </ProtectedRoute>
               }
@@ -92,7 +96,7 @@ export default function App() {
               element={
                 <ProtectedRoute>
                   <AdminLayout>
-                    <ReadyOrdersPage />
+                    <OrdersListPage defaultTab="packed" />
                   </AdminLayout>
                 </ProtectedRoute>
               }
@@ -108,31 +112,59 @@ export default function App() {
 
             {/* 6. Stage 4: Out for Delivery / Dispatched */}
             <Route
-              path="/dispatched"
+              path="/dispatch"
               element={
                 <ProtectedRoute>
                   <AdminLayout>
-                    <DispatchedOrdersPage />
+                    <OrdersListPage defaultTab="dispatch" />
                   </AdminLayout>
                 </ProtectedRoute>
               }
             />
             <Route
+              path="/dispatched"
+              element={
+                <ProtectedRoute>
+                  <AdminLayout>
+                    <OrdersListPage defaultTab="dispatch" />
+                  </AdminLayout>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/orders/dispatch"
+              element={<Navigate to="/dispatch" replace />}
+            />
+            <Route
               path="/orders/dispatched"
-              element={<Navigate to="/dispatched" replace />}
+              element={<Navigate to="/dispatch" replace />}
             />
             <Route
               path="/orders/shipped"
-              element={<Navigate to="/dispatched" replace />}
+              element={<Navigate to="/dispatch" replace />}
             />
 
-            {/* 7. Stage 5: Delivered Orders */}
+            {/* 7. History: Delivered and Cancelled Orders */}
+            <Route
+              path="/history"
+              element={
+                <ProtectedRoute>
+                  <AdminLayout>
+                    <OrderHistoryPage />
+                  </AdminLayout>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/orders/history"
+              element={<Navigate to="/history" replace />}
+            />
             <Route
               path="/delivered"
               element={
                 <ProtectedRoute>
                   <AdminLayout>
-                    <DeliveredOrdersPage />
+                    <OrderHistoryPage defaultTab="delivered" />
                   </AdminLayout>
                 </ProtectedRoute>
               }
@@ -148,7 +180,7 @@ export default function App() {
               element={
                 <ProtectedRoute>
                   <AdminLayout>
-                    <CancelledOrdersPage />
+                    <OrderHistoryPage defaultTab="cancelled" />
                   </AdminLayout>
                 </ProtectedRoute>
               }
@@ -156,18 +188,6 @@ export default function App() {
             <Route
               path="/orders/cancelled"
               element={<Navigate to="/cancelled" replace />}
-            />
-
-            {/* 9. Dispatch Board */}
-            <Route
-              path="/dispatch"
-              element={
-                <ProtectedRoute>
-                  <AdminLayout>
-                    <DispatchBoardPage />
-                  </AdminLayout>
-                </ProtectedRoute>
-              }
             />
 
             {/* 10. Delivery Partners / Fleet */}

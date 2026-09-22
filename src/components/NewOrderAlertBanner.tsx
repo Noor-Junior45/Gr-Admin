@@ -1,22 +1,24 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useNotifications } from '../context/NotificationContext';
+import { updateOrderStatus, cancelOrderRPC } from '../services/orderService';
 import { formatCurrency, formatShortId } from '../utils/formatters';
 import {
   BellRing,
-  Volume2,
   VolumeX,
   X,
   ArrowRight,
-  MapPin,
+  CheckCircle2,
+  Ban,
   Phone,
+  MapPin,
   Package,
-  Sparkles,
 } from 'lucide-react';
 
 export const NewOrderAlertBanner: React.FC = () => {
   const { activeAlert, dismissAlert, settings } = useNotifications();
   const navigate = useNavigate();
+  const [loadingAction, setLoadingAction] = useState<'accept' | 'cancel' | null>(null);
 
   if (!activeAlert) return null;
 
@@ -26,10 +28,41 @@ export const NewOrderAlertBanner: React.FC = () => {
     navigate(`/orders/${orderId}`);
   };
 
+  const handleQuickAccept = async () => {
+    if (!activeAlert?.id) return;
+    setLoadingAction('accept');
+    try {
+      await updateOrderStatus(activeAlert.id, 'packing');
+      dismissAlert();
+    } catch (err: any) {
+      alert(err.message || 'Failed to accept order');
+    } finally {
+      setLoadingAction(null);
+    }
+  };
+
+  const handleQuickCancel = async () => {
+    if (!activeAlert?.id) return;
+    const confirmCancel = window.confirm(
+      `Are you sure you want to cancel order #${formatShortId(activeAlert.id)}?`
+    );
+    if (!confirmCancel) return;
+
+    setLoadingAction('cancel');
+    try {
+      await cancelOrderRPC(activeAlert.id, 'Cancelled from alert banner');
+      dismissAlert();
+    } catch (err: any) {
+      alert(err.message || 'Failed to cancel order');
+    } finally {
+      setLoadingAction(null);
+    }
+  };
+
   return (
     <div className="fixed top-20 right-4 sm:right-6 z-50 max-w-md w-[calc(100vw-2rem)] animate-in slide-in-from-top-4 duration-300">
       <div className="bg-white border-2 border-amber-500 rounded-2xl p-4 sm:p-5 shadow-2xl shadow-amber-500/25 relative overflow-hidden">
-        {/* Glowing accent bar */}
+        {/* Glowing animated accent bar */}
         <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 animate-pulse" />
 
         {/* Header Row */}
@@ -40,16 +73,15 @@ export const NewOrderAlertBanner: React.FC = () => {
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <span className="font-extrabold text-slate-900 text-base flex items-center gap-1.5">
-                  New Order Received!
+                <span className="font-extrabold text-slate-900 text-base">
+                  Incoming Order Alert!
                 </span>
-                <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider bg-amber-100 text-amber-900 px-2 py-0.5 rounded-full border border-amber-300">
-                  <Sparkles className="w-2.5 h-2.5 text-amber-600" />
-                  Live
+                <span className="inline-flex items-center text-[10px] font-bold uppercase tracking-wider bg-rose-100 text-rose-800 px-2 py-0.5 rounded-full border border-rose-300 animate-pulse">
+                  Ringing
                 </span>
               </div>
               <p className="text-xs text-slate-500">
-                Order <span className="font-mono font-bold text-slate-800">{formatShortId(activeAlert.id)}</span> just arrived in the queue
+                Order <span className="font-mono font-bold text-slate-800">#{formatShortId(activeAlert.id)}</span> is awaiting confirmation
               </p>
             </div>
           </div>
@@ -57,14 +89,14 @@ export const NewOrderAlertBanner: React.FC = () => {
           <button
             onClick={dismissAlert}
             className="text-slate-400 hover:text-slate-700 p-1.5 rounded-lg hover:bg-slate-100 transition cursor-pointer"
-            title="Dismiss notification"
+            title="Silence alarm & dismiss"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* Order Details Brief Card */}
-        <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-2 mb-4">
+        <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-2 mb-3.5">
           <div className="flex items-center justify-between gap-2">
             <span className="font-bold text-slate-900 text-base truncate">
               {activeAlert.recipient_name || 'Customer'}
@@ -96,30 +128,56 @@ export const NewOrderAlertBanner: React.FC = () => {
           </div>
         </div>
 
-        {/* Action Buttons */}
-        <div className="flex items-center gap-2">
-          <button
-            onClick={handleOpenOrder}
-            className="flex-1 py-2.5 px-4 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs sm:text-sm rounded-xl shadow-sm transition flex items-center justify-center gap-2 cursor-pointer active:scale-98 min-h-[42px]"
-          >
-            <span>Open & Pack Order</span>
-            <ArrowRight className="w-4 h-4" />
-          </button>
+        {/* Primary Action Buttons: Accept, Cancel, Open, Mute */}
+        <div className="space-y-2">
+          <div className="grid grid-cols-2 gap-2">
+            {/* Direct Accept Button */}
+            <button
+              id="btn-alert-accept"
+              type="button"
+              disabled={loadingAction !== null}
+              onClick={handleQuickAccept}
+              className="py-2.5 px-3 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold text-xs sm:text-sm rounded-xl shadow-xs transition flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+            >
+              <CheckCircle2 className="w-4 h-4 stroke-[2.5]" />
+              <span>{loadingAction === 'accept' ? 'Accepting...' : 'Accept & Pack'}</span>
+            </button>
 
-          <button
-            onClick={dismissAlert}
-            className="py-2.5 px-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs rounded-xl border border-slate-200 transition cursor-pointer min-h-[42px] flex items-center gap-1.5"
-            title="Silence audio and dismiss"
-          >
-            {settings.soundEnabled ? (
-              <>
-                <VolumeX className="w-4 h-4 text-slate-500" />
-                <span>Mute</span>
-              </>
-            ) : (
-              <span>Close</span>
-            )}
-          </button>
+            {/* Direct Cancel Button */}
+            <button
+              id="btn-alert-cancel"
+              type="button"
+              disabled={loadingAction !== null}
+              onClick={handleQuickCancel}
+              className="py-2.5 px-3 bg-rose-50 hover:bg-rose-100 active:scale-95 text-rose-700 border border-rose-200 font-bold text-xs sm:text-sm rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+            >
+              <Ban className="w-4 h-4" />
+              <span>{loadingAction === 'cancel' ? 'Cancelling...' : 'Cancel Order'}</span>
+            </button>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {/* View Full Order Details */}
+            <button
+              type="button"
+              onClick={handleOpenOrder}
+              className="flex-1 py-2 px-3 bg-slate-100 hover:bg-slate-200 text-slate-800 font-semibold text-xs rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer"
+            >
+              <span>View Full Details</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+
+            {/* Mute Button */}
+            <button
+              type="button"
+              onClick={dismissAlert}
+              className="py-2 px-3 bg-slate-100 hover:bg-slate-200 text-slate-600 hover:text-slate-900 font-medium text-xs rounded-xl transition flex items-center gap-1.5 cursor-pointer"
+              title="Silence audio"
+            >
+              <VolumeX className="w-3.5 h-3.5" />
+              <span>Mute</span>
+            </button>
+          </div>
         </div>
       </div>
     </div>

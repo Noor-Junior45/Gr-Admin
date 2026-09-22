@@ -20,13 +20,13 @@ export interface NotificationSettings {
 
 const DEFAULT_SETTINGS: NotificationSettings = {
   soundEnabled: true,
-  soundType: 'melody',
-  volume: 0.85,
-  repeatUntilDismissed: false,
+  soundType: 'service_bell',
+  volume: 0.9,
+  repeatUntilDismissed: true, // Continuous ring until accepted or cancelled
   desktopNotifications: false,
 };
 
-const STORAGE_KEY = 'giriraj_admin_notification_settings_v1';
+const STORAGE_KEY = 'giriraj_admin_notification_settings_v2';
 
 interface NotificationContextType {
   settings: NotificationSettings;
@@ -55,9 +55,15 @@ const NotificationContext = createContext<NotificationContextType | undefined>(u
 export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [settings, setSettings] = useState<NotificationSettings>(() => {
     try {
-      const saved = localStorage.getItem(STORAGE_KEY);
+      const saved = localStorage.getItem(STORAGE_KEY) || localStorage.getItem('giriraj_admin_notification_settings_v1');
       if (saved) {
-        return { ...DEFAULT_SETTINGS, ...JSON.parse(saved) };
+        const parsed = JSON.parse(saved);
+        return {
+          ...DEFAULT_SETTINGS,
+          ...parsed,
+          soundType: parsed.soundType === 'melody' || !parsed.soundType ? 'service_bell' : parsed.soundType,
+          repeatUntilDismissed: true, // Always default to ringing until accepted or cancelled
+        };
       }
     } catch (e) {
       console.warn('Failed to parse saved notification settings:', e);
@@ -154,16 +160,12 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
       setNewOrderCountSinceOpen((prev) => prev + 1);
       setLastSyncTime(new Date());
 
-      // 1. Play sound if configured
+      // 1. Play sound if configured - continuously ring until accepted or cancelled
       if (settings.soundEnabled) {
         enableAudioOnGesture();
-        if (settings.repeatUntilDismissed) {
-          const option = SOUND_OPTIONS.find((s) => s.id === settings.soundType);
-          const interval = (option?.durationSec || 1.5) + 1.5;
-          startSoundLoop(settings.soundType, settings.volume, interval);
-        } else {
-          playSoundEffect(settings.soundType, settings.volume);
-        }
+        const option = SOUND_OPTIONS.find((s) => s.id === settings.soundType);
+        const interval = (option?.durationSec || 1.6) + 0.8;
+        startSoundLoop(settings.soundType, settings.volume, interval);
       }
 
       // 2. Desktop Notification
@@ -239,7 +241,30 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     initOrders();
   }, []);
 
-  // Supabase Realtime Subscription for incoming orders
+  // Listen for local order status changes (e.g. accepted, packed, cancelled, deleted)
+  useEffect(() => {
+    const handleStatusChanged = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (
+        detail &&
+        (detail.status === 'packing' ||
+          detail.status === 'packed' ||
+          detail.status === 'cancelled' ||
+          detail.status === 'deleted' ||
+          detail.status === 'shipped')
+      ) {
+        stopSoundLoop();
+        setActiveAlert((curr) => (curr?.id === detail.orderId ? null : curr));
+      }
+    };
+
+    window.addEventListener('order-status-changed', handleStatusChanged);
+    return () => {
+      window.removeEventListener('order-status-changed', handleStatusChanged);
+    };
+  }, []);
+
+  // Supabase Realtime Subscription for incoming orders & order status changes
   useEffect(() => {
     setRealtimeStatus('connecting');
 
@@ -256,18 +281,35 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
           if (knownOrderIdsRef.current.has(newOrder.id)) return;
           knownOrderIdsRef.current.add(newOrder.id);
 
-          // Only trigger alert if initial load is done
+          // Only trigger alert if initial load is done and order is pending
           if (isInitializedRef.current) {
-            console.log('[Notification] New order received in realtime:', newOrder.id);
-            triggerNewOrderAlert(newOrder);
+            if (newOrder.status === 'pending' || !newOrder.status) {
+              console.log('[Notification] New order received in realtime:', newOrder.id);
+              triggerNewOrderAlert(newOrder);
+            }
           }
         }
       )
       .on(
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'orders' },
-        () => {
+        (payload) => {
           setLastSyncTime(new Date());
+          const updated = payload.new as Order;
+          // If order is no longer pending (i.e. accepted or cancelled), stop alarm ring
+          if (updated && updated.status !== 'pending') {
+            stopSoundLoop();
+            setActiveAlert((curr) => (curr?.id === updated.id ? null : curr));
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'DELETE', schema: 'public', table: 'orders' },
+        (payload) => {
+          setLastSyncTime(new Date());
+          stopSoundLoop();
+          setActiveAlert((curr) => (curr?.id === payload.old?.id ? null : curr));
         }
       )
       .subscribe((status) => {

@@ -3,7 +3,6 @@ import { NavLink, useLocation } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import { fetchOrderStatusCounts, OrderStatusCounts } from '../services/orderService';
 import {
-  LayoutDashboard,
   Package,
   Clock,
   Box,
@@ -82,25 +81,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
     const s = currentParams.get('status');
 
     if (!targetStatus || targetStatus === 'all') {
-      return location.pathname === '/orders' && (!s || s === 'all');
+      return (location.pathname === '/' || location.pathname === '/orders') && (!s || s === 'all');
     }
     if (targetStatus === 'pending') {
-      return location.pathname === '/pending' || (location.pathname === '/orders' && s === 'pending');
+      return location.pathname === '/pending' || ((location.pathname === '/' || location.pathname === '/orders') && s === 'pending');
     }
     if (targetStatus === 'packing') {
-      return location.pathname === '/packing' || (location.pathname === '/orders' && s === 'packing');
+      return location.pathname === '/packing' || ((location.pathname === '/' || location.pathname === '/orders') && s === 'packing');
     }
     if (targetStatus === 'packed') {
-      return location.pathname === '/ready' || (location.pathname === '/orders' && s === 'packed');
+      return location.pathname === '/ready' || ((location.pathname === '/' || location.pathname === '/orders') && s === 'packed');
     }
     if (targetStatus === 'shipped') {
-      return location.pathname === '/dispatched' || (location.pathname === '/orders' && s === 'shipped');
+      return location.pathname === '/dispatched' || location.pathname === '/dispatch' || ((location.pathname === '/' || location.pathname === '/orders') && s === 'shipped');
     }
     if (targetStatus === 'delivered') {
-      return location.pathname === '/delivered' || (location.pathname === '/orders' && s === 'delivered');
+      return location.pathname === '/delivered' || (location.pathname === '/history' && s !== 'cancelled') || ((location.pathname === '/' || location.pathname === '/orders') && s === 'delivered');
     }
     if (targetStatus === 'cancelled') {
-      return location.pathname === '/cancelled' || (location.pathname === '/orders' && s === 'cancelled');
+      return location.pathname === '/cancelled' || (location.pathname === '/history' && s === 'cancelled') || ((location.pathname === '/' || location.pathname === '/orders') && s === 'cancelled');
     }
     return false;
   };
@@ -161,38 +160,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
         {/* Scrollable Navigation Area */}
         <div className="flex-1 px-2.5 py-3 space-y-4 overflow-y-auto custom-scrollbar">
-          {/* Main Navigation */}
+          {/* Orders Pipeline (Landing) */}
           <div className="space-y-1">
-            {!collapsed && (
-              <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 px-3 mb-1">
-                Main
-              </div>
-            )}
-
-            {/* Operations Hub */}
-            <NavLink
-              to="/"
-              onClick={onCloseMobile}
-              className={({ isActive }) =>
-                `flex items-center gap-3 px-3 py-2 rounded-xl text-xs sm:text-sm font-medium transition cursor-pointer group ${
-                  isActive && location.pathname === '/'
-                    ? 'bg-slate-900 text-white font-semibold shadow-xs'
-                    : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
-                }`
-              }
-              title={collapsed ? 'Overview' : undefined}
-            >
-              <LayoutDashboard
-                className={`w-4 h-4 shrink-0 transition ${
-                  location.pathname === '/' ? 'text-amber-400' : 'text-slate-400 group-hover:text-slate-600'
-                }`}
-              />
-              {!collapsed && <span className="truncate">Overview</span>}
-            </NavLink>
-          </div>
-
-          {/* Orders Pipeline */}
-          <div className="pt-2 border-t border-slate-100 space-y-1">
             {!collapsed && (
               <div className="flex items-center justify-between px-3 mb-1">
                 <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
@@ -204,12 +173,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </div>
             )}
 
-            {/* Merged Pending Orders */}
+            {/* Merged Pending Orders (Landing Page) */}
             <NavLink
-              to="/orders"
+              to="/"
               onClick={onCloseMobile}
               className={`flex items-center justify-between px-3 py-2 rounded-xl text-xs sm:text-sm font-medium transition cursor-pointer group ${
-                isStageActive('all') || isStageActive('pending') || location.pathname === '/orders' || location.pathname === '/pending'
+                isStageActive('all') || isStageActive('pending') || location.pathname === '/' || location.pathname === '/orders' || location.pathname === '/pending'
                   ? 'bg-slate-900 text-white font-semibold shadow-xs'
                   : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
               }`}
@@ -218,7 +187,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <div className="flex items-center gap-3 min-w-0">
                 <Clock
                   className={`w-4 h-4 shrink-0 ${
-                    isStageActive('all') || isStageActive('pending') || location.pathname === '/orders' || location.pathname === '/pending'
+                    isStageActive('all') || isStageActive('pending') || location.pathname === '/' || location.pathname === '/orders' || location.pathname === '/pending'
                       ? 'text-amber-400'
                       : 'text-amber-500'
                   }`}
@@ -228,7 +197,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               {!collapsed && (
                 <span
                   className={`text-[11px] font-mono px-2 py-0.5 rounded-md font-bold ${
-                    isStageActive('all') || isStageActive('pending') || location.pathname === '/orders' || location.pathname === '/pending'
+                    isStageActive('all') || isStageActive('pending') || location.pathname === '/' || location.pathname === '/orders' || location.pathname === '/pending'
                       ? 'bg-slate-800 text-amber-400'
                       : 'bg-amber-100 text-amber-800'
                   }`}

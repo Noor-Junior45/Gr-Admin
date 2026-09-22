@@ -85,6 +85,7 @@ export interface OrderItem {
   product_image?: string | null;
   brand?: string | null;
   unit?: string | null;
+  sku?: string | null;
   created_at?: string | null;
 }
 

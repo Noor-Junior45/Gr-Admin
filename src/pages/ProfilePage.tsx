@@ -129,19 +129,19 @@ export const ProfilePage: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900 pb-16">
-      {/* Compact Top Red Header Banner with curved bottom */}
+      {/* Profile Details displayed directly on background page without box design */}
       <div
         id="profile-header-banner"
-        className="bg-gradient-to-b from-[#d7000f] via-[#c4000e] to-[#a8000b] text-white rounded-b-3xl shadow-md px-4 sm:px-6 pt-3.5 pb-5 sm:pb-6 transition-all"
+        className="px-4 sm:px-6 pt-4 pb-2 transition-all"
       >
         <div className="max-w-xl mx-auto">
-          {/* Top Bar: Pill-shape Glassmorphism Back Button */}
-          <div className="flex items-center justify-between mb-3 relative z-20">
+          {/* Top Bar: Back Button */}
+          <div className="flex items-center justify-between mb-2 relative z-20">
             <button
               id="profile-back-btn"
               type="button"
               onClick={handleBack}
-              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-white/20 hover:bg-white/30 active:bg-white/40 backdrop-blur-md border border-white/30 text-white text-xs font-semibold shadow-xs active:scale-95 transition cursor-pointer select-none"
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-white hover:bg-slate-50 active:bg-slate-100 border border-slate-200/80 text-slate-700 hover:text-slate-900 text-xs font-semibold shadow-2xs active:scale-95 transition cursor-pointer select-none"
               aria-label="Back to Home"
               title="Back to Home"
             >
@@ -150,12 +150,12 @@ export const ProfilePage: React.FC = () => {
             </button>
           </div>
 
-          {/* User Details Row: Gmail Avatar & Formatted Name */}
-          <div className="flex items-center gap-3.5 sm:gap-4">
-            {/* Gmail Circular Avatar */}
+          {/* Centered User Info: Avatar in middle of screen -> Name below -> Email with blue tick below */}
+          <div className="flex flex-col items-center justify-center text-center pt-1">
+            {/* User Avatar Circle */}
             <div
               id="profile-avatar-circle"
-              className="w-14 h-14 sm:w-16 sm:h-16 rounded-full overflow-hidden shrink-0 border-2 border-white/80 shadow-md ring-2 ring-black/10 bg-[#ea4335] flex items-center justify-center select-none"
+              className="w-20 h-20 sm:w-22 sm:h-22 rounded-full overflow-hidden shrink-0 shadow-sm bg-amber-500 flex items-center justify-center select-none"
             >
               {googleAvatarUrl && !avatarImgError ? (
                 <img
@@ -166,30 +166,28 @@ export const ProfilePage: React.FC = () => {
                   onError={() => setAvatarImgError(true)}
                 />
               ) : (
-                <div className="w-full h-full bg-gradient-to-tr from-[#d93025] to-[#f25c54] text-white font-bold text-2xl sm:text-3xl flex items-center justify-center">
+                <div className="w-full h-full bg-gradient-to-tr from-amber-500 to-amber-600 text-white font-bold text-3xl sm:text-4xl flex items-center justify-center">
                   {avatarInitial}
                 </div>
               )}
             </div>
 
-            {/* Profile Info: Name fetched from email + verified Gmail */}
-            <div className="min-w-0 flex-1">
-              <h1 className="text-lg sm:text-xl font-bold tracking-tight text-white truncate leading-tight drop-shadow-2xs">
-                {displayName}
-              </h1>
+            {/* Name below avatar */}
+            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900 mt-3 leading-snug">
+              {displayName}
+            </h1>
 
-              {/* Verified Gmail Row with Blue Checkmark */}
-              <div className="flex items-center gap-1.5 mt-1 text-xs text-white/90 min-w-0">
-                <span className="truncate font-mono-code text-[11px] sm:text-xs text-white/90">
-                  {userEmail}
-                </span>
-                <span
-                  title="Verified Google Account"
-                  className="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-blue-500 text-white shrink-0 shadow-2xs"
-                >
-                  <Check className="w-2 h-2 stroke-[3]" />
-                </span>
-              </div>
+            {/* Email Address with Blue Tick below name */}
+            <div className="flex items-center justify-center gap-1.5 mt-1 text-slate-600">
+              <span className="font-mono-code text-xs sm:text-sm text-slate-600 select-all">
+                {userEmail}
+              </span>
+              <span
+                title="Verified Account"
+                className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-blue-500 text-white shrink-0 shadow-2xs"
+              >
+                <Check className="w-2.5 h-2.5 stroke-[3.5]" />
+              </span>
             </div>
           </div>
         </div>

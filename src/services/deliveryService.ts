@@ -523,6 +523,62 @@ export async function assignDeliveryPartner(
 }
 
 /**
+ * Automatically finds the nearest / best available rider from backend and assigns to order
+ */
+export async function autoAssignNearestDeliveryPartner(
+  orderId: string,
+  estimatedMinutes = 25
+): Promise<{ success: boolean; delivery?: Delivery; partner?: DeliveryPartner; message: string }> {
+  // 1. Fetch available partners from backend (Supabase or local sync)
+  const partners = await fetchDeliveryPartners();
+
+  if (!partners || partners.length === 0) {
+    return {
+      success: false,
+      message: 'No delivery partners found in the system. Please add delivery partners first in the Delivery Fleet tab.',
+    };
+  }
+
+  // Filter active partners
+  const activePartners = partners.filter((p) => p.is_active !== false);
+  const candidatePool = activePartners.length > 0 ? activePartners : partners;
+
+  // Rank / pick nearest available candidate:
+  // Preference: lowest current_active_orders, then highest rating, then total_completed
+  const selectedPartner = [...candidatePool].sort((a, b) => {
+    const aActive = a.current_active_orders || 0;
+    const bActive = b.current_active_orders || 0;
+    if (aActive !== bActive) return aActive - bActive; // least busy rider first
+    const aRating = a.rating || 5.0;
+    const bRating = b.rating || 5.0;
+    if (bRating !== aRating) return bRating - aRating; // higher rated rider first
+    return (b.total_completed || 0) - (a.total_completed || 0);
+  })[0];
+
+  if (!selectedPartner) {
+    return {
+      success: false,
+      message: 'Could not select an available delivery partner.',
+    };
+  }
+
+  // 2. Assign via backend
+  const delivery = await assignDeliveryPartner(
+    orderId,
+    selectedPartner.id,
+    estimatedMinutes,
+    `Auto-dispatched to nearest available partner (${selectedPartner.name})`
+  );
+
+  return {
+    success: true,
+    delivery,
+    partner: selectedPartner,
+    message: `Automatically assigned nearest rider: ${selectedPartner.name} (${selectedPartner.phone || selectedPartner.vehicle_type})`,
+  };
+}
+
+/**
  * Update delivery progression and synchronize with order status & customer timeline
  */
 export async function updateDeliveryStatus(

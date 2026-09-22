@@ -25,10 +25,17 @@ import { PrivacyPolicyPage } from './pages/PrivacyPolicyPage';
 import { TermsOfServicePage } from './pages/TermsOfServicePage';
 import { DeleteAccountPolicyPage } from './pages/DeleteAccountPolicyPage';
 import { RefundPolicyPage } from './pages/RefundPolicyPage';
+import { useAndroidBackHandler } from './hooks/useAndroidBackHandler';
+
+const AndroidBackManager: React.FC = () => {
+  useAndroidBackHandler();
+  return null;
+};
 
 export default function App() {
   return (
     <BrowserRouter>
+      <AndroidBackManager />
       <AuthProvider>
         <NotificationProvider>
           <Routes>
@@ -246,45 +253,22 @@ export default function App() {
               }
             />
 
-            {/* 15. Privacy Policy */}
-            <Route
-              path="/privacy-policy"
-              element={
-                <ProtectedRoute>
-                  <PrivacyPolicyPage />
-                </ProtectedRoute>
-              }
-            />
+            {/* 15. Privacy Policy (Public for Google Play Store compliance) */}
+            <Route path="/privacy-policy" element={<PrivacyPolicyPage />} />
+            <Route path="/privacy" element={<PrivacyPolicyPage />} />
 
-            {/* 16. Terms of Service */}
-            <Route
-              path="/terms-of-service"
-              element={
-                <ProtectedRoute>
-                  <TermsOfServicePage />
-                </ProtectedRoute>
-              }
-            />
+            {/* 16. Terms of Service (Public for Google Play Store compliance) */}
+            <Route path="/terms-of-service" element={<TermsOfServicePage />} />
+            <Route path="/terms" element={<TermsOfServicePage />} />
 
-            {/* 17. Delete Account Policy (Play Store Compliant) */}
-            <Route
-              path="/delete-account-policy"
-              element={
-                <ProtectedRoute>
-                  <DeleteAccountPolicyPage />
-                </ProtectedRoute>
-              }
-            />
+            {/* 17. Delete Account & User Data (Public for Google Play Store Data Safety compliance) */}
+            <Route path="/delete-account-policy" element={<DeleteAccountPolicyPage />} />
+            <Route path="/delete-account" element={<DeleteAccountPolicyPage />} />
+            <Route path="/data-deletion" element={<DeleteAccountPolicyPage />} />
 
-            {/* 18. Refund Policy */}
-            <Route
-              path="/refund-policy"
-              element={
-                <ProtectedRoute>
-                  <RefundPolicyPage />
-                </ProtectedRoute>
-              }
-            />
+            {/* 18. Refund Policy (Public) */}
+            <Route path="/refund-policy" element={<RefundPolicyPage />} />
+            <Route path="/refund" element={<RefundPolicyPage />} />
 
             {/* Fallback */}
             <Route path="*" element={<Navigate to="/" replace />} />

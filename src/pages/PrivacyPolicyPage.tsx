@@ -5,6 +5,14 @@ import { ArrowLeft, ShieldCheck, Lock, Eye, Server, FileText, Mail } from 'lucid
 export const PrivacyPolicyPage: React.FC = () => {
   const navigate = useNavigate();
 
+  const handleBack = () => {
+    if (window.history.length > 1) {
+      navigate(-1);
+    } else {
+      navigate('/login');
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 pb-20">
       {/* Sticky Header */}
@@ -13,9 +21,9 @@ export const PrivacyPolicyPage: React.FC = () => {
           <button
             id="privacy-back-btn"
             type="button"
-            onClick={() => navigate('/profile')}
+            onClick={handleBack}
             className="p-1.5 -ml-1.5 rounded-full hover:bg-slate-100 active:scale-90 transition cursor-pointer text-slate-700"
-            aria-label="Back to Profile"
+            aria-label="Back"
           >
             <ArrowLeft className="w-5 h-5 stroke-[2.2]" />
           </button>

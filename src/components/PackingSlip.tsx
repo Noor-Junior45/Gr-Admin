@@ -26,7 +26,7 @@ export const PackingSlip: React.FC<PackingSlipProps> = ({ order, items }) => {
         </div>
         <div className="text-right">
           <div className="text-lg font-mono font-bold tracking-tight">
-            ORDER: {formatShortId(order.id)}
+            ORDER: #{formatShortId(order.id)}
           </div>
           <div className="text-xs text-gray-600 font-mono">{order.id}</div>
           <div className="text-xs text-gray-800 mt-1 flex items-center justify-end gap-1">

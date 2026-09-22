@@ -157,14 +157,17 @@ export const ReadyOrdersPage: React.FC = () => {
     }
   };
 
-  // Filter strictly only active orders where a delivery rider is assigned
+  // Filter active orders for the Packed / Ready queue:
+  // Shows all orders that are packed (ready for rider) OR active orders with an assigned delivery partner
   const riderAssignedOrders = orders.filter((order) => {
-    if (order.status === 'delivered' || order.status === 'cancelled') return false;
+    const st = (order.status || '').toLowerCase();
+    if (st === 'delivered' || st === 'cancelled' || st === 'shipped') return false;
 
     const del = deliveries[order.id] || order.delivery;
     if (del?.status === 'delivered' || del?.status === 'returned') return false;
 
-    return Boolean(
+    const isPacked = st === 'packed' || st === 'ready';
+    const hasRider = Boolean(
       del?.delivery_partner_id ||
       del?.delivery_partner ||
       order.delivery?.delivery_partner_id ||
@@ -172,6 +175,8 @@ export const ReadyOrdersPage: React.FC = () => {
       (order as any).rider_id ||
       (order as any).rider_name
     );
+
+    return isPacked || hasRider;
   });
 
   return (
@@ -365,24 +370,28 @@ export const ReadyOrdersPage: React.FC = () => {
                     )}
                   </button>
 
-                  {/* Button 2: Rider Name (Red Liquid Glass Pill) */}
+                  {/* Button 2: Rider Name or Assign Rider (Liquid Glass Pill) */}
                   <button
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
                       setAssigningOrder(order);
                     }}
-                    title="Click to view or change assigned rider"
-                    className="relative overflow-hidden w-full h-8 sm:h-8.5 px-2.5 sm:px-3 rounded-full flex items-center justify-center gap-1.5 text-[11px] sm:text-xs font-semibold text-white bg-gradient-to-b from-red-500 via-red-600 to-red-700 border border-red-400/50 shadow-[inset_0_1px_1.5px_rgba(255,255,255,0.45),0_2px_5px_rgba(220,38,38,0.3)] backdrop-blur-md hover:from-red-400 hover:to-red-600 active:scale-[0.98] transition-all cursor-pointer group/rider"
+                    title={assignedRider?.name || (order as any).rider_name ? 'Click to view or change assigned rider' : 'Click to assign delivery partner'}
+                    className={`relative overflow-hidden w-full h-8 sm:h-8.5 px-2.5 sm:px-3 rounded-full flex items-center justify-center gap-1.5 text-[11px] sm:text-xs font-semibold backdrop-blur-md active:scale-[0.98] transition-all cursor-pointer group/rider ${
+                      assignedRider?.name || (order as any).rider_name
+                        ? 'text-white bg-gradient-to-b from-red-500 via-red-600 to-red-700 border border-red-400/50 shadow-[inset_0_1px_1.5px_rgba(255,255,255,0.45),0_2px_5px_rgba(220,38,38,0.3)] hover:from-red-400 hover:to-red-600'
+                        : 'text-amber-950 bg-gradient-to-b from-amber-100 via-amber-200 to-amber-300 border border-amber-400/60 shadow-[inset_0_1px_1.5px_rgba(255,255,255,0.6),0_2px_4px_rgba(245,158,11,0.2)] hover:brightness-105'
+                    }`}
                   >
                     {/* Liquid glass top specular reflection */}
                     <span className="pointer-events-none absolute inset-x-0 top-0 h-[46%] bg-gradient-to-b from-white/40 via-white/10 to-transparent rounded-t-full" />
 
-                    <Bike className="w-3.5 h-3.5 text-white/95 shrink-0 drop-shadow-xs" />
+                    <Bike className={`w-3.5 h-3.5 shrink-0 drop-shadow-xs ${assignedRider?.name || (order as any).rider_name ? 'text-white/95' : 'text-amber-900'}`} />
                     <span className="truncate drop-shadow-xs">
-                      {assignedRider?.name || (order as any).rider_name || 'Rider Assigned'}
+                      {assignedRider?.name || (order as any).rider_name || '+ Assign Rider'}
                     </span>
-                    <ChevronRight className="w-3 h-3 text-white/80 shrink-0 group-hover/rider:translate-x-0.5 transition-transform" />
+                    <ChevronRight className={`w-3 h-3 shrink-0 group-hover/rider:translate-x-0.5 transition-transform ${assignedRider?.name || (order as any).rider_name ? 'text-white/80' : 'text-amber-800'}`} />
                   </button>
                 </div>
               </div>

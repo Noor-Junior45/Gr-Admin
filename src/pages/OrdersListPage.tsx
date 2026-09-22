@@ -33,9 +33,22 @@ import {
 import { PackingQueuePage } from './PackingQueuePage';
 import { ReadyOrdersPage } from './ReadyOrdersPage';
 import { DispatchBoardPage } from './DispatchBoardPage';
+import { useSwipeGesture } from '../hooks/useSwipeGesture';
 
-const PENDING_ONLY_STATUSES: OrderStatus[] = ['pending'];
+const STAGE_TABS: Array<'order' | 'packing' | 'packed' | 'dispatch'> = [
+  'order',
+  'packing',
+  'packed',
+  'dispatch',
+];
+
+const PENDING_ONLY_STATUSES: OrderStatus[] = ['pending', 'confirmed'];
 const PAGE_SIZE = 30;
+
+const isPendingOrder = (status?: string | null): boolean => {
+  const s = (status || '').toLowerCase().trim();
+  return s === 'pending' || s === 'confirmed' || s === 'placed';
+};
 
 export interface OrdersListPageProps {
   defaultTab?: 'order' | 'packing' | 'packed' | 'dispatch';
@@ -85,6 +98,27 @@ export const OrdersListPage: React.FC<OrdersListPageProps> = ({ defaultTab }) =>
       navigate('/dispatch', { replace: true });
     }
   };
+
+  // Swipe gestures to smoothly transition between stages (Order <-> Packing <-> Packed <-> Dispatch)
+  const handleSwipeLeft = useCallback(() => {
+    const curIdx = STAGE_TABS.indexOf(activeTab);
+    if (curIdx < STAGE_TABS.length - 1) {
+      handleTabChange(STAGE_TABS[curIdx + 1]);
+    }
+  }, [activeTab]);
+
+  const handleSwipeRight = useCallback(() => {
+    const curIdx = STAGE_TABS.indexOf(activeTab);
+    if (curIdx > 0) {
+      handleTabChange(STAGE_TABS[curIdx - 1]);
+    }
+  }, [activeTab]);
+
+  const swipeHandlers = useSwipeGesture({
+    onSwipeLeft: handleSwipeLeft,
+    onSwipeRight: handleSwipeRight,
+    minDistance: 50,
+  });
 
   // Real-time stage counts for minimal badges
   const [counts, setCounts] = useState<OrderStatusCounts>({
@@ -153,7 +187,7 @@ export const OrdersListPage: React.FC<OrdersListPageProps> = ({ defaultTab }) =>
         pageSize: PAGE_SIZE,
       });
 
-      const pendingOnly = result.orders.filter((o) => o.status === 'pending');
+      const pendingOnly = result.orders.filter((o) => isPendingOrder(o.status));
       setOrders(pendingOnly);
       setTotalCount(result.totalCount);
       setPage(1);
@@ -180,7 +214,7 @@ export const OrdersListPage: React.FC<OrdersListPageProps> = ({ defaultTab }) =>
         { event: '*', schema: 'public', table: 'orders' },
         (payload: any) => {
           if (payload?.eventType === 'UPDATE' && payload?.new) {
-            if (payload.new.status !== 'pending') {
+            if (!isPendingOrder(payload.new.status)) {
               setOrders((prev) => prev.filter((o) => o.id !== payload.new.id));
               return;
             }
@@ -248,7 +282,7 @@ export const OrdersListPage: React.FC<OrdersListPageProps> = ({ defaultTab }) =>
         pageSize: PAGE_SIZE,
       });
 
-      const pendingOnly = result.orders.filter((o) => o.status === 'pending');
+      const pendingOnly = result.orders.filter((o) => isPendingOrder(o.status));
       if (pendingOnly.length > 0) {
         setOrders((prev) => {
           const existingIds = new Set(prev.map((o) => o.id));
@@ -287,10 +321,10 @@ export const OrdersListPage: React.FC<OrdersListPageProps> = ({ defaultTab }) =>
     return () => observer.disconnect();
   }, [loadMoreOrders, hasMore, loadingMore, loading]);
 
-  const pendingOrders = orders.filter((o) => o.status === 'pending');
+  const pendingOrders = orders.filter((o) => isPendingOrder(o.status));
 
   return (
-    <div className="space-y-4">
+    <div {...swipeHandlers} className="space-y-4 touch-pan-y min-h-[75vh]">
       {/* Top Navbar: 4 Minimal Buttons (Order, Packing, Packed, Dispatch) */}
       <div className="w-full flex items-center justify-between gap-3 pb-1 border-b border-slate-200/80">
         <div

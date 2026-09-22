@@ -18,28 +18,41 @@ export const DeleteAccountPolicyPage: React.FC = () => {
   const navigate = useNavigate();
   const { user, signOut } = useAuth();
 
-  const [confirmEmail, setConfirmEmail] = useState('');
+  const [confirmEmail, setConfirmEmail] = useState(user?.email || '');
   const [reason, setReason] = useState('Resigning or changing operational role');
   const [understandChecked, setUnderstandChecked] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [successNotice, setSuccessNotice] = useState(false);
 
+  const handleBack = () => {
+    if (window.history.length > 1) {
+      navigate(-1);
+    } else {
+      navigate('/login');
+    }
+  };
+
   const handleSubmitDeletion = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (confirmEmail.trim().toLowerCase() !== (user?.email || '').toLowerCase()) {
+    if (!confirmEmail.trim()) {
+      alert('Please enter your account email to confirm deletion request.');
+      return;
+    }
+
+    if (user?.email && confirmEmail.trim().toLowerCase() !== user.email.toLowerCase()) {
       alert('Please enter your exact account email to confirm deletion request.');
       return;
     }
 
     setSubmitting(true);
 
-    // Record deletion request in localStorage audit queue
+    // Record deletion request in audit queue
     try {
       const requests = JSON.parse(
         localStorage.getItem('smartrun_account_deletion_requests') || '[]'
       );
       requests.push({
-        email: user?.email,
+        email: confirmEmail.trim().toLowerCase(),
         reason,
         requestedAt: new Date().toISOString(),
         status: 'pending_purge',
@@ -52,10 +65,12 @@ export const DeleteAccountPolicyPage: React.FC = () => {
     setTimeout(async () => {
       setSubmitting(false);
       setSuccessNotice(true);
-      setTimeout(async () => {
-        await signOut();
-        navigate('/login');
-      }, 3000);
+      if (user) {
+        setTimeout(async () => {
+          await signOut();
+          navigate('/login');
+        }, 3000);
+      }
     }, 1200);
   };
 
@@ -67,23 +82,23 @@ export const DeleteAccountPolicyPage: React.FC = () => {
           <button
             id="delete-account-back-btn"
             type="button"
-            onClick={() => navigate('/profile')}
+            onClick={handleBack}
             className="p-1.5 -ml-1.5 rounded-full hover:bg-slate-100 active:scale-90 transition cursor-pointer text-slate-700"
-            aria-label="Back to Profile"
+            aria-label="Back"
           >
             <ArrowLeft className="w-5 h-5 stroke-[2.2]" />
           </button>
           <div>
             <div className="flex items-center gap-2">
               <h1 className="text-base sm:text-lg font-bold text-slate-900 leading-tight">
-                Delete Account Policy
+                Delete Account & Data
               </h1>
               <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-rose-50 text-rose-700 border border-rose-200">
                 Play Store Policy
               </span>
             </div>
             <p className="text-[11px] text-slate-500">
-              Account and associated data deletion standards & in-app request form
+              Account and personal data deletion standards & deletion request form
             </p>
           </div>
         </div>
@@ -209,7 +224,13 @@ export const DeleteAccountPolicyPage: React.FC = () => {
 
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Type your email (<span className="font-mono-code text-slate-900">{user?.email}</span>) to confirm:
+                    {user?.email ? (
+                      <>
+                        Type your email (<span className="font-mono text-slate-900 font-bold">{user.email}</span>) to confirm:
+                      </>
+                    ) : (
+                      <>Enter your registered account email to request deletion:</>
+                    )}
                   </label>
                   <input
                     type="email"

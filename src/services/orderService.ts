@@ -1,7 +1,13 @@
 import { supabase } from '../lib/supabaseClient';
 import { withSkewRetry } from '../utils/supabaseHelper';
 import { Order, OrderItem, OrderStatus, OrderDashboardStats, OrderFilters } from '../types';
-import { fetchDeliveryByOrderId, fetchRiderById, logTrackingEvent } from './deliveryService';
+import {
+  fetchDeliveryByOrderId,
+  fetchRiderById,
+  logTrackingEvent,
+  getLocalDeliveries,
+  normalizeDeliveryPartner,
+} from './deliveryService';
 
 const LOCAL_STORAGE_ORDERS_CACHE_KEY = 'gr_admin_cached_orders_v2';
 const LOCAL_STORAGE_ITEMS_CACHE_KEY = 'gr_admin_cached_items_v2';
@@ -75,15 +81,28 @@ export async function fetchOrdersList(
         count: 'exact',
       });
 
+    // Helper to expand status to synonyms & case-variants
+    const getStatusVariants = (statusVal: string): string[] => {
+      const s = (statusVal || '').toLowerCase().trim();
+      if (s === 'pending') return ['pending', 'confirmed', 'placed', 'Pending', 'Confirmed', 'Placed', 'PENDING', 'CONFIRMED', 'PLACED'];
+      if (s === 'packing') return ['packing', 'Packing', 'PACKING', 'in_packing', 'IN_PACKING'];
+      if (s === 'packed') return ['packed', 'Packed', 'PACKED', 'ready', 'Ready', 'READY'];
+      if (s === 'shipped') return ['shipped', 'Shipped', 'SHIPPED', 'dispatched', 'Dispatched', 'DISPATCHED', 'out_for_delivery'];
+      if (s === 'delivered') return ['delivered', 'Delivered', 'DELIVERED', 'completed', 'Completed', 'COMPLETED'];
+      if (s === 'cancelled') return ['cancelled', 'canceled', 'Cancelled', 'Canceled', 'CANCELLED', 'CANCELED'];
+      return [statusVal];
+    };
+
     // Apply status filter
     if (filters?.statusIn && filters.statusIn.length > 0) {
-      query = query.in('status', filters.statusIn);
+      const expanded = new Set<string>();
+      filters.statusIn.forEach((st) => {
+        getStatusVariants(st).forEach((v) => expanded.add(v));
+      });
+      query = query.in('status', Array.from(expanded));
     } else if (filters?.status && filters.status !== 'all') {
-      if (filters.status === 'cancelled') {
-        query = query.in('status', ['cancelled', 'canceled', 'CANCELLED', 'CANCELED']);
-      } else {
-        query = query.eq('status', filters.status);
-      }
+      const variants = getStatusVariants(filters.status);
+      query = query.in('status', variants);
     }
 
     // Apply payment status filter
@@ -175,13 +194,14 @@ export async function fetchOrdersList(
         .select('*', { count: 'exact' });
 
       if (filters?.statusIn && filters.statusIn.length > 0) {
-        fallbackQuery = fallbackQuery.in('status', filters.statusIn);
+        const expanded = new Set<string>();
+        filters.statusIn.forEach((st) => {
+          getStatusVariants(st).forEach((v) => expanded.add(v));
+        });
+        fallbackQuery = fallbackQuery.in('status', Array.from(expanded));
       } else if (filters?.status && filters.status !== 'all') {
-        if (filters.status === 'cancelled') {
-          fallbackQuery = fallbackQuery.in('status', ['cancelled', 'canceled', 'CANCELLED', 'CANCELED']);
-        } else {
-          fallbackQuery = fallbackQuery.eq('status', filters.status);
-        }
+        const variants = getStatusVariants(filters.status);
+        fallbackQuery = fallbackQuery.in('status', variants);
       }
 
       fallbackQuery = fallbackQuery.order('placed_at', { ascending: false });
@@ -221,55 +241,94 @@ export async function fetchOrdersList(
       };
     });
 
-    // Augment with delivery details asynchronously
-    const augmentedOrders = await Promise.all(
-      orderList.map(async (order) => {
-        let delivery = await fetchDeliveryByOrderId(order.id);
-        if (
-          !delivery?.delivery_partner &&
-          ((order as any).rider_id ||
-            (order as any).delivery_partner_id ||
-            (order as any).rider_name)
-        ) {
-          const riderId = (order as any).delivery_partner_id || (order as any).rider_id;
-          const rider = riderId ? await fetchRiderById(riderId) : null;
-          if (rider || (order as any).rider_name) {
-            delivery = {
-              id: delivery?.id || `del-${order.id}`,
-              order_id: order.id,
-              delivery_partner_id: riderId || null,
-              delivery_partner:
-                rider ||
-                ((order as any).rider_name
-                  ? {
-                      id: riderId || `r-${order.id}`,
-                      name: (order as any).rider_name,
-                      phone: (order as any).rider_phone || '',
-                      vehicle_type: 'bike',
-                      vehicle_number: (order as any).rider_vehicle || '',
-                      is_active: true,
-                      rating: 5.0,
-                      total_completed: 0,
-                    }
-                  : null),
-              status:
-                delivery?.status ||
-                ((order.status === 'shipped'
-                  ? 'out_for_delivery'
-                  : order.status === 'delivered'
-                  ? 'delivered'
-                  : 'assigned') as any),
-              created_at: delivery?.created_at || order.placed_at,
-              updated_at: delivery?.updated_at || order.placed_at,
-            };
+    // Efficient Batch Delivery Query (1 network call instead of N parallel waterfall calls)
+    const orderIds = orderList.map((o) => o.id).filter(Boolean);
+    const delMap: Record<string, any> = {};
+
+    // 1. First populate known deliveries from localStorage
+    try {
+      const localDeliveries = getLocalDeliveries();
+      for (const [oid, del] of Object.entries(localDeliveries)) {
+        if (del) delMap[oid] = del;
+      }
+    } catch {
+      // ignore local reading issue
+    }
+
+    // 2. Batch fetch from Supabase deliveries table in one query
+    if (orderIds.length > 0) {
+      try {
+        const { data: dbDeliveries } = await withSkewRetry(
+          () =>
+            supabase
+              .from('deliveries')
+              .select('*, delivery_partner:delivery_partners(*)')
+              .in('order_id', orderIds),
+          2,
+          400
+        );
+        if (dbDeliveries && Array.isArray(dbDeliveries)) {
+          for (const d of dbDeliveries) {
+            if (d.order_id) {
+              delMap[d.order_id] = {
+                ...delMap[d.order_id],
+                ...d,
+                delivery_partner: d.delivery_partner
+                  ? normalizeDeliveryPartner(d.delivery_partner)
+                  : delMap[d.order_id]?.delivery_partner || null,
+              };
+            }
           }
         }
-        return {
-          ...order,
-          delivery,
+      } catch (e) {
+        console.warn('[orderService] Batch delivery query failed, using local/cached deliveries:', e);
+      }
+    }
+
+    // 3. Augment each order synchronously with its delivery data and fallback rider details
+    const augmentedOrders = orderList.map((order) => {
+      let delivery = delMap[order.id] || null;
+      if (
+        !delivery?.delivery_partner &&
+        ((order as any).rider_id ||
+          (order as any).delivery_partner_id ||
+          (order as any).rider_name)
+      ) {
+        const riderId = (order as any).delivery_partner_id || (order as any).rider_id;
+        delivery = {
+          id: delivery?.id || `del-${order.id}`,
+          order_id: order.id,
+          delivery_partner_id: riderId || null,
+          delivery_partner:
+            delivery?.delivery_partner ||
+            ((order as any).rider_name
+              ? {
+                  id: riderId || `r-${order.id}`,
+                  name: (order as any).rider_name,
+                  phone: (order as any).rider_phone || '',
+                  vehicle_type: 'bike',
+                  vehicle_number: (order as any).rider_vehicle || '',
+                  is_active: true,
+                  rating: 5.0,
+                  total_completed: 0,
+                }
+              : null),
+          status:
+            delivery?.status ||
+            ((order.status === 'shipped'
+              ? 'out_for_delivery'
+              : order.status === 'delivered'
+              ? 'delivered'
+              : 'assigned') as any),
+          created_at: delivery?.created_at || order.placed_at,
+          updated_at: delivery?.updated_at || order.placed_at,
         };
-      })
-    );
+      }
+      return {
+        ...order,
+        delivery,
+      };
+    });
 
     // Save fetched orders to local storage cache for offline resilience
     saveCachedOrders(augmentedOrders);
@@ -283,9 +342,18 @@ export async function fetchOrdersList(
     if (cachedOrders.length > 0) {
       let filtered = cachedOrders;
       if (filters?.statusIn && filters.statusIn.length > 0) {
-        filtered = filtered.filter((o) => filters.statusIn!.includes(o.status));
+        const allowed = new Set(filters.statusIn.map((s) => s.toLowerCase()));
+        if (allowed.has('pending')) { allowed.add('confirmed'); allowed.add('placed'); }
+        if (allowed.has('cancelled')) { allowed.add('canceled'); }
+        if (allowed.has('shipped')) { allowed.add('dispatched'); }
+        filtered = filtered.filter((o) => allowed.has((o.status || '').toLowerCase()));
       } else if (filters?.status && filters.status !== 'all') {
-        filtered = filtered.filter((o) => o.status === filters.status);
+        const s = filters.status.toLowerCase();
+        const allowed = new Set([s]);
+        if (s === 'pending') { allowed.add('confirmed'); allowed.add('placed'); }
+        if (s === 'cancelled') { allowed.add('canceled'); }
+        if (s === 'shipped') { allowed.add('dispatched'); }
+        filtered = filtered.filter((o) => allowed.has((o.status || '').toLowerCase()));
       }
       return { orders: filtered, totalCount: filtered.length };
     }

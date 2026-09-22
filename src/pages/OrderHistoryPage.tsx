@@ -5,6 +5,7 @@ import { fetchOrderStatusCounts, OrderStatusCounts } from '../services/orderServ
 import { DeliveredOrdersPage } from './DeliveredOrdersPage';
 import { CancelledOrdersPage } from './CancelledOrdersPage';
 import { CheckCircle2, XCircle } from 'lucide-react';
+import { useSwipeGesture } from '../hooks/useSwipeGesture';
 
 export interface OrderHistoryPageProps {
   defaultTab?: 'delivered' | 'cancelled';
@@ -39,6 +40,25 @@ export const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ defaultTab }
       navigate('/cancelled', { replace: true });
     }
   };
+
+  // Swipe gestures to toggle between Delivered and Cancelled
+  const handleSwipeLeft = useCallback(() => {
+    if (activeTab === 'delivered') {
+      handleTabChange('cancelled');
+    }
+  }, [activeTab]);
+
+  const handleSwipeRight = useCallback(() => {
+    if (activeTab === 'cancelled') {
+      handleTabChange('delivered');
+    }
+  }, [activeTab]);
+
+  const swipeHandlers = useSwipeGesture({
+    onSwipeLeft: handleSwipeLeft,
+    onSwipeRight: handleSwipeRight,
+    minDistance: 50,
+  });
 
   // Real-time stage counts for minimal badges
   const [counts, setCounts] = useState<OrderStatusCounts>({
@@ -81,7 +101,7 @@ export const OrderHistoryPage: React.FC<OrderHistoryPageProps> = ({ defaultTab }
   }, [loadCounts]);
 
   return (
-    <div className="space-y-4">
+    <div {...swipeHandlers} className="space-y-4 touch-pan-y min-h-[75vh]">
       {/* Top Navbar: 2 Minimal Buttons (1st: Delivered, 2nd: Cancelled) */}
       <div className="w-full flex items-center justify-between gap-3 pb-1 border-b border-slate-200/80">
         <div

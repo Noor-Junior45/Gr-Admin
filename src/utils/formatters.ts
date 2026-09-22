@@ -59,14 +59,15 @@ export function formatTimeOnly(dateStr: string | null | undefined): string {
 }
 
 export function formatShortId(id: string | null | undefined): string {
-  if (!id) return '#---';
-  if (id.includes('-')) {
-    return `#${id.split('-')[0].toUpperCase()}`;
+  if (!id) return '---';
+  const clean = id.startsWith('#') ? id.slice(1) : id;
+  if (clean.includes('-')) {
+    return clean.split('-')[0].toUpperCase();
   }
-  if (id.length > 8) {
-    return `#${id.slice(0, 8).toUpperCase()}`;
+  if (clean.length > 8) {
+    return clean.slice(0, 8).toUpperCase();
   }
-  return `#${id.toUpperCase()}`;
+  return clean.toUpperCase();
 }
 
 export interface StatusConfig {

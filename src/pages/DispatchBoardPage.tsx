@@ -76,18 +76,13 @@ export const DispatchBoardPage: React.FC = () => {
 
       setOrders(orderRes.orders);
 
-      // Load associated delivery status/rider assignments for these orders
+      // Extract deliveries already augmented by fetchOrdersList
       const delMap: Record<string, Delivery> = {};
-      await Promise.all(
-        orderRes.orders.map(async (order) => {
-          try {
-            const del = await fetchDeliveryByOrderId(order.id);
-            if (del) delMap[order.id] = del;
-          } catch {
-            // Ignore individual fetch failure
-          }
-        })
-      );
+      orderRes.orders.forEach((order) => {
+        if (order.delivery) {
+          delMap[order.id] = order.delivery;
+        }
+      });
       setDeliveries(delMap);
     } catch (err: any) {
       console.error('Failed to load dispatched orders queue:', err);

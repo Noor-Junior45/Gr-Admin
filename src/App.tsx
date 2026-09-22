@@ -8,14 +8,7 @@ import { AdminLayout } from './components/AdminLayout';
 // Core Application Pages
 import { LoginPage } from './pages/LoginPage';
 import { OrdersListPage } from './pages/OrdersListPage';
-import { PendingOrdersPage } from './pages/PendingOrdersPage';
-import { PackingQueuePage } from './pages/PackingQueuePage';
-import { ReadyOrdersPage } from './pages/ReadyOrdersPage';
-import { DispatchedOrdersPage } from './pages/DispatchedOrdersPage';
-import { DeliveredOrdersPage } from './pages/DeliveredOrdersPage';
-import { CancelledOrdersPage } from './pages/CancelledOrdersPage';
 import { OrderDetailPage } from './pages/OrderDetailPage';
-import { DispatchBoardPage } from './pages/DispatchBoardPage';
 import { OrderHistoryPage } from './pages/OrderHistoryPage';
 import { DeliveryPartnersPage } from './pages/DeliveryPartnersPage';
 import { ProductsStockPage } from './pages/ProductsStockPage';

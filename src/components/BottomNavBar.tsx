@@ -7,11 +7,7 @@ import {
 } from 'lucide-react';
 import { useNotifications } from '../context/NotificationContext';
 
-interface BottomNavBarProps {
-  sidebarCollapsed?: boolean;
-}
-
-export const BottomNavBar: React.FC<BottomNavBarProps> = ({ sidebarCollapsed }) => {
+export const BottomNavBar: React.FC = () => {
   const location = useLocation();
   const { newOrderCountSinceOpen } = useNotifications();
 
@@ -56,9 +52,7 @@ export const BottomNavBar: React.FC<BottomNavBarProps> = ({ sidebarCollapsed }) 
   return (
     <nav
       id="app-bottom-navbar"
-      className={`fixed bottom-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200/90 pb-safe shadow-[0_-4px_20px_rgba(0,0,0,0.06)] print:hidden transition-all duration-200 left-0 ${
-        sidebarCollapsed ? 'lg:left-18' : 'lg:left-64'
-      }`}
+      className="fixed bottom-0 inset-x-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200/90 pb-safe shadow-[0_-4px_20px_rgba(0,0,0,0.06)] print:hidden"
       aria-label="Bottom Navigation"
     >
       <div className="flex items-center justify-around sm:justify-center gap-1 sm:gap-4 md:gap-8 h-15 sm:h-16 px-3 sm:px-6 max-w-lg sm:max-w-2xl mx-auto">

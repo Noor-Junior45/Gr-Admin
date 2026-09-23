@@ -60,8 +60,8 @@ export const NewOrderAlertBanner: React.FC = () => {
   };
 
   return (
-    <div className="fixed top-20 right-4 sm:right-6 z-50 max-w-md w-[calc(100vw-2rem)] animate-in slide-in-from-top-4 duration-300">
-      <div className="bg-white border-2 border-amber-500 rounded-2xl p-4 sm:p-5 shadow-2xl shadow-amber-500/25 relative overflow-hidden">
+    <div className="fixed top-4 sm:top-6 inset-x-3 sm:inset-x-auto sm:right-6 z-[99999] max-w-md w-auto sm:w-[26rem] mx-auto sm:mx-0 animate-in slide-in-from-top-6 duration-300 drop-shadow-2xl">
+      <div className="bg-white border-2 border-amber-500 rounded-2xl p-4 sm:p-5 shadow-[0_20px_50px_rgba(245,158,11,0.35)] relative overflow-hidden ring-4 ring-amber-500/20">
         {/* Glowing animated accent bar */}
         <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 animate-pulse" />
 

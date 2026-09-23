@@ -9,6 +9,8 @@ import {
   unlockAudioContext,
 } from '../utils/audioNotification';
 import { Order, RealtimeConnectionState } from '../types';
+import { Capacitor } from '@capacitor/core';
+import { LocalNotifications } from '@capacitor/local-notifications';
 
 export interface NotificationSettings {
   soundEnabled: boolean;
@@ -21,9 +23,9 @@ export interface NotificationSettings {
 const DEFAULT_SETTINGS: NotificationSettings = {
   soundEnabled: true,
   soundType: 'service_bell',
-  volume: 0.9,
+  volume: 1.0,
   repeatUntilDismissed: true, // Continuous ring until accepted or cancelled
-  desktopNotifications: false,
+  desktopNotifications: true,
 };
 
 const STORAGE_KEY = 'giriraj_admin_notification_settings_v2';
@@ -61,8 +63,9 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
         return {
           ...DEFAULT_SETTINGS,
           ...parsed,
+          soundEnabled: parsed.soundEnabled ?? true,
           soundType: parsed.soundType === 'melody' || !parsed.soundType ? 'service_bell' : parsed.soundType,
-          repeatUntilDismissed: true, // Always default to ringing until accepted or cancelled
+          repeatUntilDismissed: true,
         };
       }
     } catch (e) {
@@ -91,6 +94,54 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
   // Track known order IDs to prevent duplicate sound/alert triggers
   const knownOrderIdsRef = useRef<Set<string>>(new Set());
   const isInitializedRef = useRef(false);
+
+  // Setup Android high priority notification channel & request notification permission
+  useEffect(() => {
+    const initNotifications = async () => {
+      // 1. Always attempt AudioContext unlock on startup
+      try {
+        await unlockAudioContext();
+        setIsAudioUnlocked(true);
+      } catch (e) {
+        console.warn('Audio auto-unlock:', e);
+      }
+
+      // 2. Android Capacitor Notification Channel & Permissions
+      if (Capacitor.isNativePlatform()) {
+        try {
+          // Check permissions
+          const permStatus = await LocalNotifications.checkPermissions();
+          if (permStatus.display !== 'granted') {
+            const req = await LocalNotifications.requestPermissions();
+            if (req.display === 'granted') {
+              setDesktopPermissionState('granted');
+            }
+          } else {
+            setDesktopPermissionState('granted');
+          }
+
+          // Create / verify high-priority sound channel for Android
+          await LocalNotifications.createChannel({
+            id: 'smartrun_order_alerts',
+            name: 'SmartRun Order Alerts',
+            description: 'Instant popup notifications and audible ringing for incoming warehouse orders',
+            importance: 5, // High importance (heads-up popups on screen)
+            visibility: 1, // Public on lockscreen
+            sound: 'beep.wav',
+            vibration: true,
+            lights: true,
+            lightColor: '#F59E0B',
+          });
+        } catch (e) {
+          console.warn('[LocalNotifications] Native setup error:', e);
+        }
+      } else if (typeof window !== 'undefined' && 'Notification' in window) {
+        setDesktopPermissionState(Notification.permission);
+      }
+    };
+
+    initNotifications();
+  }, []);
 
   const updateSettings = (newSettings: Partial<NotificationSettings>) => {
     setSettings((prev) => {
@@ -122,6 +173,19 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
   };
 
   const requestDesktopPermission = async (): Promise<boolean> => {
+    if (Capacitor.isNativePlatform()) {
+      try {
+        const res = await LocalNotifications.requestPermissions();
+        const granted = res.display === 'granted';
+        setDesktopPermissionState(granted ? 'granted' : 'denied');
+        updateSettings({ desktopNotifications: granted });
+        return granted;
+      } catch (e) {
+        console.warn('Capacitor notification permission request failed:', e);
+        return false;
+      }
+    }
+
     if (typeof window === 'undefined' || !('Notification' in window)) {
       setDesktopPermissionState('unsupported');
       return false;
@@ -155,32 +219,65 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
   // Trigger alert workflow when a new order is received
   const triggerNewOrderAlert = useCallback(
-    (order: Order) => {
+    async (order: Order) => {
+      // 1. Immediately show in-app popup modal / banner
       setActiveAlert(order);
       setNewOrderCountSinceOpen((prev) => prev + 1);
       setLastSyncTime(new Date());
 
-      // 1. Play sound if configured - continuously ring until accepted or cancelled
+      // 2. Play sound if configured - continuously ring until accepted or cancelled
       if (settings.soundEnabled) {
-        enableAudioOnGesture();
+        await enableAudioOnGesture();
         const option = SOUND_OPTIONS.find((s) => s.id === settings.soundType);
         const interval = (option?.durationSec || 1.6) + 0.8;
         startSoundLoop(settings.soundType, settings.volume, interval);
       }
 
-      // 2. Desktop Notification
+      const shortId = order.id ? `#${order.id.slice(0, 8).toUpperCase()}` : '';
+      const notifTitle = `⚡ New Order Received ${shortId}`;
+      const notifBody = `${order.recipient_name || 'Customer'} • ₹${order.total_amount || 0} • ${order.city || 'Express Delivery'}`;
+
+      // 3. Android Native Push / Heads-up Popup Notification via LocalNotifications
+      if (Capacitor.isNativePlatform()) {
+        try {
+          const numericId = Math.abs(
+            order.id
+              .split('')
+              .reduce((acc, char) => (acc << 5) - acc + char.charCodeAt(0), 0)
+          ) % 100000;
+
+          await LocalNotifications.schedule({
+            notifications: [
+              {
+                id: numericId || Math.floor(Math.random() * 10000),
+                title: notifTitle,
+                body: notifBody,
+                channelId: 'smartrun_order_alerts',
+                smallIcon: 'ic_stat_name',
+                iconColor: '#F59E0B',
+                sound: 'beep.wav',
+                extra: {
+                  orderId: order.id,
+                },
+              },
+            ],
+          });
+        } catch (err) {
+          console.warn('[LocalNotifications] Schedule error on Android:', err);
+        }
+      }
+
+      // 4. Desktop / Web Browser System Notification
       if (
+        !Capacitor.isNativePlatform() &&
         settings.desktopNotifications &&
         typeof window !== 'undefined' &&
         'Notification' in window &&
         Notification.permission === 'granted'
       ) {
         try {
-          const shortId = order.id ? `#${order.id.slice(0, 8).toUpperCase()}` : '';
-          const title = `⚡ New Order Received ${shortId}`;
-          const body = `${order.recipient_name || 'Customer'} • ₹${order.total_amount || 0} • ${order.city || 'Standard Delivery'}`;
-          const notification = new Notification(title, {
-            body,
+          const notification = new Notification(notifTitle, {
+            body: notifBody,
             icon: '/favicon.ico',
           });
           notification.onclick = () => {
@@ -219,6 +316,8 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
   // Initial fetch to populate known order IDs
   useEffect(() => {
+    let isCancelled = false;
+
     const initOrders = async () => {
       try {
         const { data } = await supabase
@@ -227,18 +326,24 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
           .order('placed_at', { ascending: false })
           .limit(150);
 
-        if (data) {
+        if (data && !isCancelled) {
           data.forEach((o: any) => knownOrderIdsRef.current.add(o.id));
         }
       } catch (e) {
         console.warn('Initial orders check for notification listener failed:', e);
       } finally {
-        isInitializedRef.current = true;
-        setLastSyncTime(new Date());
+        if (!isCancelled) {
+          isInitializedRef.current = true;
+          setLastSyncTime(new Date());
+        }
       }
     };
 
     initOrders();
+
+    return () => {
+      isCancelled = true;
+    };
   }, []);
 
   // Listen for local order status changes (e.g. accepted, packed, cancelled, deleted)
@@ -264,6 +369,37 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     };
   }, []);
 
+  // Polling fallback to guarantee orders are detected even if WebSocket drops on Android
+  useEffect(() => {
+    const pollInterval = setInterval(async () => {
+      try {
+        if (!isInitializedRef.current) return;
+
+        const { data, error } = await supabase
+          .from('orders')
+          .select('id, recipient_name, recipient_phone, city, total_amount, item_count, status, placed_at')
+          .in('status', ['pending', 'placed', 'confirmed'])
+          .order('placed_at', { ascending: false })
+          .limit(15);
+
+        if (error || !data) return;
+
+        for (const o of data) {
+          if (!knownOrderIdsRef.current.has(o.id)) {
+            console.log('[Polling Fallback] New pending order found:', o.id);
+            knownOrderIdsRef.current.add(o.id);
+            triggerNewOrderAlert(o as Order);
+            break; // trigger one alert at a time
+          }
+        }
+      } catch (err) {
+        console.warn('[Polling Fallback] Check error:', err);
+      }
+    }, 12000); // Check every 12 seconds in background
+
+    return () => clearInterval(pollInterval);
+  }, [triggerNewOrderAlert]);
+
   // Supabase Realtime Subscription for incoming orders & order status changes
   useEffect(() => {
     setRealtimeStatus('connecting');
@@ -283,7 +419,8 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
           // Only trigger alert if initial load is done and order is pending
           if (isInitializedRef.current) {
-            if (newOrder.status === 'pending' || !newOrder.status) {
+            const st = (newOrder.status || '').toLowerCase();
+            if (st === 'pending' || st === 'confirmed' || st === 'placed' || !newOrder.status) {
               console.log('[Notification] New order received in realtime:', newOrder.id);
               triggerNewOrderAlert(newOrder);
             }
@@ -297,7 +434,7 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
           setLastSyncTime(new Date());
           const updated = payload.new as Order;
           // If order is no longer pending (i.e. accepted or cancelled), stop alarm ring
-          if (updated && updated.status !== 'pending') {
+          if (updated && updated.status !== 'pending' && updated.status !== 'confirmed') {
             stopSoundLoop();
             setActiveAlert((curr) => (curr?.id === updated.id ? null : curr));
           }

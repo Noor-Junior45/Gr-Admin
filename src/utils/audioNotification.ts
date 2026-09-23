@@ -1,4 +1,5 @@
-// Web Audio API Synthesizer for instant, zero-dependency order alerts and continuous alarm ringing
+// Web Audio API Synthesizer + HTML5 Audio fallback for instant order alerts and continuous alarm ringing
+// Supports Android WebView, Capacitor native wrappers, and standard desktop/mobile browsers.
 
 export type SoundType =
   | 'service_bell'
@@ -62,6 +63,7 @@ export const SOUND_OPTIONS: SoundOption[] = [
 let globalAudioCtx: AudioContext | null = null;
 let activeLoopTimeout: ReturnType<typeof setTimeout> | null = null;
 let isCurrentlyLooping = false;
+let audioUnlocked = false;
 
 function getAudioContext(): AudioContext | null {
   try {
@@ -73,7 +75,7 @@ function getAudioContext(): AudioContext | null {
       globalAudioCtx = new AudioContextClass();
     }
     if (globalAudioCtx.state === 'suspended') {
-      globalAudioCtx.resume();
+      globalAudioCtx.resume().catch(() => {});
     }
     return globalAudioCtx;
   } catch (err) {
@@ -83,19 +85,43 @@ function getAudioContext(): AudioContext | null {
 }
 
 /**
- * Unlock AudioContext on user interaction
+ * Unlock AudioContext on user interaction or app initialization
  */
 export async function unlockAudioContext(): Promise<boolean> {
-  const ctx = getAudioContext();
-  if (!ctx) return false;
-  if (ctx.state === 'suspended') {
-    try {
+  try {
+    const ctx = getAudioContext();
+    if (!ctx) return false;
+
+    if (ctx.state === 'suspended') {
       await ctx.resume();
-    } catch (e) {
-      console.warn('Failed to resume AudioContext:', e);
     }
+
+    // Play a 1ms inaudible buffer to force mobile browsers and Android WebView into unmuted state
+    const buffer = ctx.createBuffer(1, 1, 22050);
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    source.connect(ctx.destination);
+    source.start(0);
+
+    audioUnlocked = ctx.state === 'running';
+    return audioUnlocked;
+  } catch (e) {
+    console.warn('Failed to unlock AudioContext:', e);
+    return false;
   }
-  return ctx.state === 'running';
+}
+
+// Auto-register touch & click listeners on window to automatically unlock audio as early as possible
+if (typeof window !== 'undefined') {
+  const autoUnlock = () => {
+    unlockAudioContext();
+    window.removeEventListener('click', autoUnlock);
+    window.removeEventListener('touchstart', autoUnlock);
+    window.removeEventListener('keydown', autoUnlock);
+  };
+  window.addEventListener('click', autoUnlock, { once: true, passive: true });
+  window.addEventListener('touchstart', autoUnlock, { once: true, passive: true });
+  window.addEventListener('keydown', autoUnlock, { once: true, passive: true });
 }
 
 /**
@@ -109,22 +135,26 @@ function playTone(
   gainValue: number,
   type: OscillatorType = 'sine'
 ) {
-  const osc = ctx.createOscillator();
-  const gain = ctx.createGain();
+  try {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
 
-  osc.type = type;
-  osc.frequency.setValueAtTime(freq, startTime);
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, startTime);
 
-  // Instant attack, exponential decay envelope
-  gain.gain.setValueAtTime(0.0001, startTime);
-  gain.gain.exponentialRampToValueAtTime(Math.max(gainValue, 0.0001), startTime + 0.008);
-  gain.gain.exponentialRampToValueAtTime(0.00001, startTime + duration);
+    // Instant attack, exponential decay envelope
+    gain.gain.setValueAtTime(0.0001, startTime);
+    gain.gain.exponentialRampToValueAtTime(Math.max(gainValue, 0.0001), startTime + 0.008);
+    gain.gain.exponentialRampToValueAtTime(0.00001, startTime + duration);
 
-  osc.connect(gain);
-  gain.connect(ctx.destination);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
 
-  osc.start(startTime);
-  osc.stop(startTime + duration + 0.05);
+    osc.start(startTime);
+    osc.stop(startTime + duration + 0.05);
+  } catch (err) {
+    console.warn('Error playing tone:', err);
+  }
 }
 
 /**
@@ -137,38 +167,38 @@ function playAcousticBell(
   duration: number,
   volume: number
 ) {
-  // Acoustic partials of physical cast metal bells:
-  // Fundamental (hum), Prime (strike), Minor 3rd (tierce), 5th (quint), Octave (nominal), and high shimmer
-  const partials = [
-    { mult: 0.5, gain: 0.35, decay: duration * 1.1, type: 'sine' as OscillatorType },
-    { mult: 1.0, gain: 1.0, decay: duration, type: 'sine' as OscillatorType },
-    { mult: 1.2, gain: 0.55, decay: duration * 0.75, type: 'sine' as OscillatorType },
-    { mult: 1.5, gain: 0.4, decay: duration * 0.6, type: 'sine' as OscillatorType },
-    { mult: 2.0, gain: 0.65, decay: duration * 0.8, type: 'sine' as OscillatorType },
-    { mult: 2.76, gain: 0.3, decay: duration * 0.45, type: 'triangle' as OscillatorType },
-    { mult: 4.07, gain: 0.22, decay: duration * 0.3, type: 'sine' as OscillatorType },
-  ];
+  try {
+    const partials = [
+      { mult: 0.5, gain: 0.35, decay: duration * 1.1, type: 'sine' as OscillatorType },
+      { mult: 1.0, gain: 1.0, decay: duration, type: 'sine' as OscillatorType },
+      { mult: 1.2, gain: 0.55, decay: duration * 0.75, type: 'sine' as OscillatorType },
+      { mult: 1.5, gain: 0.4, decay: duration * 0.6, type: 'sine' as OscillatorType },
+      { mult: 2.0, gain: 0.65, decay: duration * 0.8, type: 'sine' as OscillatorType },
+      { mult: 2.76, gain: 0.3, decay: duration * 0.45, type: 'triangle' as OscillatorType },
+      { mult: 4.07, gain: 0.22, decay: duration * 0.3, type: 'sine' as OscillatorType },
+    ];
 
-  partials.forEach((p) => {
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
+    partials.forEach((p) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
 
-    osc.type = p.type;
-    osc.frequency.setValueAtTime(baseFreq * p.mult, startTime);
+      osc.type = p.type;
+      osc.frequency.setValueAtTime(baseFreq * p.mult, startTime);
 
-    const targetGain = Math.max(0.0001, volume * p.gain);
-    gain.gain.setValueAtTime(0.0001, startTime);
-    // Instant hammer impact (4ms)
-    gain.gain.exponentialRampToValueAtTime(targetGain, startTime + 0.004);
-    // Exponential resonance decay
-    gain.gain.exponentialRampToValueAtTime(0.00001, startTime + p.decay);
+      const targetGain = Math.max(0.0001, volume * p.gain);
+      gain.gain.setValueAtTime(0.0001, startTime);
+      gain.gain.exponentialRampToValueAtTime(targetGain, startTime + 0.004);
+      gain.gain.exponentialRampToValueAtTime(0.00001, startTime + p.decay);
 
-    osc.connect(gain);
-    gain.connect(ctx.destination);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
 
-    osc.start(startTime);
-    osc.stop(startTime + p.decay + 0.05);
-  });
+      osc.start(startTime);
+      osc.stop(startTime + p.decay + 0.05);
+    });
+  } catch (err) {
+    console.warn('Error playing bell:', err);
+  }
 }
 
 /**
@@ -178,14 +208,26 @@ export function playSoundEffect(type: SoundType, volume: number = 0.85) {
   const ctx = getAudioContext();
   if (!ctx) return;
 
+  if (ctx.state === 'suspended') {
+    ctx.resume().catch(() => {});
+  }
+
   const now = ctx.currentTime + 0.02;
-  const masterVolume = Math.max(0.1, Math.min(volume, 1.0)) * 0.75;
+  const masterVolume = Math.max(0.1, Math.min(volume, 1.0)) * 0.85;
+
+  // Trigger tactile vibration on supported mobile devices
+  if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+    try {
+      navigator.vibrate([200, 100, 200, 100, 300]);
+    } catch {
+      // Ignored if vibration is not allowed
+    }
+  }
 
   switch (type) {
     case 'service_bell':
     case 'chime': {
       // Order Service Bell: Crisp triple strike chime (Ding! Ding! Ding!)
-      // Resonant frequencies: C6 (1046.5Hz), E6 (1318.5Hz), G6 (1567.98Hz)
       playAcousticBell(ctx, 1046.5, now, 1.3, masterVolume);
       playAcousticBell(ctx, 1318.5, now + 0.15, 1.4, masterVolume * 1.05);
       playAcousticBell(ctx, 1567.98, now + 0.32, 1.6, masterVolume * 1.15);
@@ -193,8 +235,7 @@ export function playSoundEffect(type: SoundType, volume: number = 0.85) {
     }
 
     case 'alarm_chime': {
-      // High-urgency food delivery order alarm: 4-pulse alternating chime
-      // (High-Low-High-Low with bright bell acoustics)
+      // High-urgency delivery order alarm: alternating chime
       playTone(ctx, 880.0, now, 0.18, masterVolume * 0.9, 'triangle');
       playTone(ctx, 1760.0, now, 0.16, masterVolume * 0.35, 'sine');
 
@@ -211,7 +252,7 @@ export function playSoundEffect(type: SoundType, volume: number = 0.85) {
 
     case 'urgent_buzzer':
     case 'radar': {
-      // Triple commercial order buzzer beep (like scanner terminal)
+      // Triple commercial order buzzer beep
       playTone(ctx, 1760.0, now, 0.09, masterVolume * 0.95, 'square');
       playTone(ctx, 2093.0, now + 0.12, 0.09, masterVolume, 'square');
       playTone(ctx, 2637.0, now + 0.24, 0.28, masterVolume * 1.1, 'square');
@@ -227,11 +268,9 @@ export function playSoundEffect(type: SoundType, volume: number = 0.85) {
     }
 
     case 'cash_register': {
-      // Mechanical register drawer lever click
+      // Register drawer lever click + coin chime
       playTone(ctx, 1200, now, 0.04, masterVolume * 0.8, 'square');
       playTone(ctx, 1600, now + 0.04, 0.05, masterVolume * 0.9, 'square');
-
-      // Metallic coin register bell
       playAcousticBell(ctx, 1760.0, now + 0.1, 0.8, masterVolume * 0.7);
       playAcousticBell(ctx, 2637.0, now + 0.22, 1.0, masterVolume * 0.8);
       break;

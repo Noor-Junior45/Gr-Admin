@@ -1,6 +1,5 @@
 import React from 'react';
 import { BottomNavBar } from './BottomNavBar';
-import { NewOrderAlertBanner } from './NewOrderAlertBanner';
 import { NotificationSettingsModal } from './NotificationSettingsModal';
 
 interface AdminLayoutProps {
@@ -10,8 +9,7 @@ interface AdminLayoutProps {
 export const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col font-sans">
-      {/* Global Sound / Realtime Alerts & Modals */}
-      <NewOrderAlertBanner />
+      {/* Global Sound / Realtime Modals */}
       <NotificationSettingsModal />
 
       {/* Full-width Main Content Area (Clean layout across all screen sizes) */}

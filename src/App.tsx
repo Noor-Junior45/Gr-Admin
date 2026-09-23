@@ -4,6 +4,7 @@ import { AuthProvider } from './context/AuthContext';
 import { NotificationProvider } from './context/NotificationContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { AdminLayout } from './components/AdminLayout';
+import { NewOrderAlertBanner } from './components/NewOrderAlertBanner';
 
 // Core Application Pages
 import { LoginPage } from './pages/LoginPage';
@@ -31,6 +32,8 @@ export default function App() {
       <AndroidBackManager />
       <AuthProvider>
         <NotificationProvider>
+          {/* Always-on Global Real-Time New Order Pop-up Alert Banner */}
+          <NewOrderAlertBanner />
           <Routes>
             {/* Public Auth Screen */}
             <Route path="/login" element={<LoginPage />} />

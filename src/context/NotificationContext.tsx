@@ -11,6 +11,7 @@ import {
 import { Order, RealtimeConnectionState } from '../types';
 import { Capacitor } from '@capacitor/core';
 import { LocalNotifications } from '@capacitor/local-notifications';
+import { PushNotifications } from '@capacitor/push-notifications';
 
 export interface NotificationSettings {
   soundEnabled: boolean;
@@ -120,18 +121,74 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
             setDesktopPermissionState('granted');
           }
 
-          // Create / verify high-priority sound channel for Android
+          // Delete old channel if exists to ensure new custom sound takes effect
+          try {
+            await LocalNotifications.deleteChannel({ id: 'smartrun_order_alerts' });
+          } catch (ignored) {}
+
+          // Create high-priority sound channel for Android with custom sound
           await LocalNotifications.createChannel({
             id: 'smartrun_order_alerts',
             name: 'SmartRun Order Alerts',
             description: 'Instant popup notifications and audible ringing for incoming warehouse orders',
             importance: 5, // High importance (heads-up popups on screen)
             visibility: 1, // Public on lockscreen
-            sound: 'beep.wav',
+            sound: 'smartrun_order_alert.wav',
             vibration: true,
             lights: true,
             lightColor: '#F59E0B',
           });
+
+          // Register for Background Remote Push Notifications (Firebase Cloud Messaging)
+          try {
+            const pushPerm = await PushNotifications.checkPermissions();
+            if (pushPerm.receive !== 'granted') {
+              await PushNotifications.requestPermissions();
+            }
+            await PushNotifications.register();
+
+            PushNotifications.addListener('registration', async (token) => {
+              console.log('[FCM] Push registration success, token:', token.value);
+              try {
+                // Save device token to Supabase device_tokens table if available
+                await supabase.from('device_tokens').upsert(
+                  {
+                    token: token.value,
+                    platform: 'android',
+                    updated_at: new Date().toISOString(),
+                  },
+                  { onConflict: 'token' }
+                );
+              } catch (err) {
+                console.warn('[FCM] Token persistence notice:', err);
+              }
+            });
+
+            PushNotifications.addListener('pushNotificationReceived', (notification) => {
+              console.log('[FCM] Foreground push received:', notification);
+              const data = notification.data || {};
+              const orderId = data.orderId || data.order_id || 'new';
+              triggerNewOrderAlert({
+                id: orderId,
+                status: 'pending',
+                recipient_name: notification.title || 'New Customer',
+                total_amount: data.amount ? parseFloat(data.amount) : 0,
+                city: data.city || 'Express Delivery',
+                placed_at: new Date().toISOString(),
+              } as Order);
+            });
+
+            PushNotifications.addListener('pushNotificationActionPerformed', (notification) => {
+              console.log('[FCM] Notification action performed:', notification);
+              const data = notification.notification.data || {};
+              const orderId = data.orderId || data.order_id;
+              if (orderId && typeof window !== 'undefined') {
+                window.location.href = `/orders/${orderId}`;
+              }
+            });
+          } catch (pushErr) {
+            console.warn('[FCM] Push notification initialization note:', pushErr);
+          }
         } catch (e) {
           console.warn('[LocalNotifications] Native setup error:', e);
         }
@@ -253,9 +310,9 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
                 title: notifTitle,
                 body: notifBody,
                 channelId: 'smartrun_order_alerts',
-                smallIcon: 'ic_stat_name',
+                smallIcon: 'ic_launcher',
                 iconColor: '#F59E0B',
-                sound: 'beep.wav',
+                sound: 'smartrun_order_alert.wav',
                 extra: {
                   orderId: order.id,
                 },
@@ -278,7 +335,7 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
         try {
           const notification = new Notification(notifTitle, {
             body: notifBody,
-            icon: '/favicon.ico',
+            icon: '/icon-192.png',
           });
           notification.onclick = () => {
             window.focus();

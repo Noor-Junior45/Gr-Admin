@@ -2,6 +2,7 @@ package com.smartrun.hub;
 
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
+import android.content.ContentResolver;
 import android.media.AudioAttributes;
 import android.net.Uri;
 import android.os.Build;
@@ -29,7 +30,7 @@ public class MainActivity extends BridgeActivity {
             e.printStackTrace();
         }
 
-        // 2. Create high priority notification channel for Android 8.0+ (Oreo and above)
+        // 2. Create high priority notification channel with our app's custom loud sound file
         createNotificationChannel();
     }
 
@@ -39,16 +40,29 @@ public class MainActivity extends BridgeActivity {
             String description = "High-priority audible alerts and popup notifications for incoming warehouse orders";
             int importance = NotificationManager.IMPORTANCE_HIGH;
 
-            NotificationChannel channel = new NotificationChannel(HIGH_PRIORITY_CHANNEL_ID, name, importance);
-            channel.setDescription(description);
-            channel.enableLights(true);
-            channel.enableVibration(true);
-            channel.setVibrationPattern(new long[]{0, 500, 200, 500, 200, 700});
-            channel.setShowBadge(true);
-            channel.setLockscreenVisibility(android.app.Notification.VISIBILITY_PUBLIC);
-
             NotificationManager notificationManager = getSystemService(NotificationManager.class);
             if (notificationManager != null) {
+                // Delete old channel if exists to ensure newly set custom sound takes effect
+                try {
+                    notificationManager.deleteNotificationChannel(HIGH_PRIORITY_CHANNEL_ID);
+                } catch (Exception ignored) {}
+
+                Uri soundUri = Uri.parse(ContentResolver.SCHEME_ANDROID_RESOURCE + "://" + getPackageName() + "/" + R.raw.smartrun_order_alert);
+                AudioAttributes audioAttributes = new AudioAttributes.Builder()
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
+                        .build();
+
+                NotificationChannel channel = new NotificationChannel(HIGH_PRIORITY_CHANNEL_ID, name, importance);
+                channel.setDescription(description);
+                channel.enableLights(true);
+                channel.enableVibration(true);
+                channel.setVibrationPattern(new long[]{0, 600, 250, 600, 250, 800});
+                channel.setSound(soundUri, audioAttributes);
+                channel.setShowBadge(true);
+                channel.setLockscreenVisibility(android.app.Notification.VISIBILITY_PUBLIC);
+                channel.setBypassDnd(true);
+
                 notificationManager.createNotificationChannel(channel);
             }
         }

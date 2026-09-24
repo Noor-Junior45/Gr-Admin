@@ -12,9 +12,9 @@ const config: CapacitorConfig = {
       presentationOptions: ['badge', 'sound', 'alert']
     },
     LocalNotifications: {
-      smallIcon: 'ic_stat_name',
+      smallIcon: 'ic_launcher',
       iconColor: '#F59E0B',
-      sound: 'beep.wav'
+      sound: 'smartrun_order_alert.wav'
     }
   }
 };
